@@ -95,6 +95,9 @@ def generator_view(request):
                 filename = filename.replace(" ","_")
             else:
                 filename = "rustdesk"
+            if platform in ("windows", "windows-x86"):
+                version_label = "nightly" if version == "master" else version
+                filename = f"{filename}_v{version_label}"
             if not all(char.isascii() for char in appname):
                 appname = "rustdesk"
             myuuid = str(uuid.uuid4())
