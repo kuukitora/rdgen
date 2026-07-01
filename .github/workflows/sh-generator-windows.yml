@@ -531,3 +531,13 @@ jobs:
         uses: geekyeggo/delete-artifact@v5
         with:
           name: encrypted-secrets-zip
+
+      - name: Delete bridge artifact
+        uses: geekyeggo/delete-artifact@v5
+        with:
+          name: bridge-artifact
+
+      - name: Delete topmost window artifact
+        uses: geekyeggo/delete-artifact@v5
+        with:
+          name: topmostwindow-artifacts
