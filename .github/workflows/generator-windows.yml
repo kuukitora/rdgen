@@ -581,8 +581,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rdgen-windows-${{ env.filename }}
-          path: |
-            ./SignOutput/*.exe
+          path: ./SignOutput/${{ env.filename }}.exe
           if-no-files-found: warn
           retention-days: 14
 
