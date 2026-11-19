@@ -109,7 +109,7 @@ WSGI_APPLICATION = 'rdgen.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': os.environ.get('RDGEN_DB_PATH') or BASE_DIR / 'db.sqlite3',
         'OPTIONS': {
             # WAL mode allows concurrent readers plus one writer without
             # blocking readers, which is important when multiple GitHub
