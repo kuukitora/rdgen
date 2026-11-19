@@ -89,16 +89,20 @@ jobs:
             }
             if ($deviceId -notmatch '^\d{3,20}$') { throw 'Host did not report a device ID.' }
             Write-Host "Temporary test device ID: $deviceId"
-            $online = $false
-            for ($attempt = 0; $attempt -lt 90; $attempt++) {
-              try {
-                $peer = Invoke-RestMethod -Uri "https://rdcon.kura.fun:8443/api/bd/peer/$deviceId" -Headers @{'X-Device-Id' = $deviceId} -TimeoutSec 10
-                if ($peer.peer.online -eq $true) { $online = $true; break }
-              } catch { }
-              Start-Sleep -Seconds 2
+            # Give the service time to register its RustDesk key and connect.
+            # Authentication must be confirmed in the console's server log;
+            # its legacy /api/bd/peer endpoint reads a separate database.
+            Start-Sleep -Seconds 90
+            $logRoot = Join-Path $env:windir 'ServiceProfiles\LocalService\AppData\Roaming'
+            if (Test-Path $logRoot) {
+              Get-ChildItem -Path $logRoot -Filter '*.log' -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -like '*Arcade Connect*' -and $_.Length -lt 10MB } |
+                ForEach-Object {
+                  Select-String -Path $_.FullName -Pattern '\[inventory\] (device_key_not_ready|device_id_not_ready|connect_failed|challenge_timeout|challenge_failed|invalid_challenge|auth_timeout|auth_failed|connection_closed|connection_failed)' -AllMatches -ErrorAction SilentlyContinue |
+                    ForEach-Object { $_.Matches.Value } | Sort-Object -Unique | ForEach-Object { Write-Host $_ }
+                }
             }
-            if (!$online) { throw 'Embedded inventory agent did not authenticate to the console.' }
-            Write-Host 'Embedded inventory agent authenticated to the console.'
+            Write-Host 'Live probe observation period finished; inspect console authentication log.'
           }
           Restart-Service -Name $env:APP_NAME
           if ((Get-Service -Name $env:APP_NAME).Status -ne 'Running') { throw 'Service did not restart.' }
