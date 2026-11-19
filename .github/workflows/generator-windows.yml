@@ -49,6 +49,14 @@ env:
 
 
 jobs:
+  verify-update:
+    if: ${{ inputs.version == 'verify-update' }}
+    uses: ./.github/workflows/windows-update-check.yml
+    with:
+      bundle: ${{ inputs.zip_url }}
+      app_name: ${{ inputs.app_version }}
+    secrets: inherit
+
   verify-candidate:
     if: ${{ inputs.version == 'verify-installer' || inputs.version == 'probe-inventory' }}
     uses: ./.github/workflows/windows-install-check.yml
@@ -59,19 +67,19 @@ jobs:
     secrets: inherit
 
   setup:
-    if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' }}
+    if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     uses: ./.github/workflows/fetch-encrypted-secrets.yml
     with:
       zip_url_json: ${{ inputs.zip_url }}
 
   generate-bridge:
-    if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' }}
+    if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     uses: ./.github/workflows/bridge.yml
     with:
       version: ${{ inputs.version }}
 
   build-RustDeskTempTopMostWindow:
-    if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' }}
+    if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     needs: setup
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
     with:
@@ -86,7 +94,7 @@ jobs:
       fail-fast: false
 
   build-for-windows-flutter:
-    if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' }}
+    if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     name: Build Windows
     needs: [build-RustDeskTempTopMostWindow, generate-bridge, setup]
     runs-on: ${{ matrix.job.os }}
@@ -936,7 +944,7 @@ jobs:
     needs: [build-for-windows-flutter]
     runs-on: ubuntu-latest
     continue-on-error: true
-    if: ${{ always() && inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' }}
+    if: ${{ always() && inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     steps:
       - name: Delete secrets artifact
         uses: geekyeggo/delete-artifact@v6

@@ -1,0 +1,86 @@
+name: Verify isolated Windows update
+on:
+  workflow_call:
+    inputs:
+      bundle:
+        required: true
+        type: string
+      app_name:
+        required: true
+        type: string
+    secrets:
+      ZIP_PASSWORD:
+        required: true
+permissions:
+  contents: read
+jobs:
+  update-check:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare isolated feed and candidate files
+        shell: pwsh
+        env:
+          BUNDLE: ${{ inputs.bundle }}
+          RDGEN_ARTIFACT_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:BUNDLE -notmatch '^secrets_[0-9a-f-]{36}\.zip$') { throw 'Invalid bundle name' }
+          python -m pip install pyzipper cryptography
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force candidate | Out-Null
+          Invoke-WebRequest -Uri "https://rdgen.kura.fun:8443/get_zip?filename=$env:BUNDLE" -OutFile candidate/bundle.zip
+          @'
+          import os, pathlib, pyzipper
+          root = pathlib.Path('candidate')
+          with pyzipper.AESZipFile(root/'bundle.zip') as archive:
+              archive.setpassword(os.environ['RDGEN_ARTIFACT_PASSWORD'].encode())
+              for name in ['old.msi', 'new.msi', 'rustdesk-update.json', 'rustdesk-update.json.sig']:
+                  (root/name).write_bytes(archive.read(name))
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item candidate/new.msi candidate/rustdesk-x86_64.msi
+          python .github/patches/update_validation_server.py prepare candidate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          certutil.exe -addstore -f Root candidate/test-ca.pem | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install temporary test CA' }
+          Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n127.0.0.1 rdgen.kura.fun"
+          Clear-DnsClientCache
+          $python = (Get-Command python).Source
+          $server = Start-Process -FilePath $python -ArgumentList @('.github/patches/update_validation_server.py', 'serve', 'candidate') -WindowStyle Hidden -PassThru
+          Start-Sleep -Seconds 3
+          if ($server.HasExited) { throw 'Loopback update feed did not start' }
+      - name: Verify unattended update
+        shell: pwsh
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:APP_NAME -notin @('Arcade Connect', 'Arcade Connect Admin')) { throw 'Unexpected application name' }
+          $old = (Resolve-Path candidate/old.msi).Path
+          $new = (Resolve-Path candidate/new.msi).Path
+          $extract = Join-Path $env:RUNNER_TEMP 'rdgen-candidate-extract'
+          New-Item -ItemType Directory -Force $extract | Out-Null
+          $p = Start-Process msiexec.exe -ArgumentList @('/a', "`"$new`"", '/qn', "TARGETDIR=`"$extract`"") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Candidate extraction failed: $($p.ExitCode)" }
+          $expected = @(Get-ChildItem -Path $extract -Filter "$env:APP_NAME.exe" -File -Recurse)
+          if ($expected.Count -ne 1) { throw 'Expected executable not found in candidate MSI' }
+          $expectedHash = (Get-FileHash -Algorithm SHA256 $expected[0].FullName).Hash
+          $exe = Join-Path $env:ProgramFiles "$env:APP_NAME\$env:APP_NAME.exe"
+          New-NetFirewallRule -DisplayName 'RDGen update test blocks Internet' -Direction Outbound -Action Block -Program $exe -RemoteAddress Internet | Out-Null
+          $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$old`"", '/qn', '/norestart') -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Old MSI install failed: $($p.ExitCode)" }
+          if (!(Test-Path $exe)) { throw 'Old executable was not installed' }
+          if ((Get-FileHash -Algorithm SHA256 $exe).Hash -eq $expectedHash) { throw 'Old and new executables are identical' }
+          $updated = $false
+          for ($attempt = 0; $attempt -lt 100; $attempt++) {
+            if ((Test-Path $exe) -and (Get-FileHash -Algorithm SHA256 $exe).Hash -eq $expectedHash) {
+              $service = Get-CimInstance Win32_Service -Filter "Name='$env:APP_NAME'"
+              if ($service -and $service.State -eq 'Running' -and $service.StartMode -eq 'Auto') { $updated = $true; break }
+            }
+            Start-Sleep -Seconds 3
+          }
+          if (Test-Path candidate/requests.log) { Get-Content candidate/requests.log | Sort-Object -Unique }
+          if (!$updated) { throw 'Candidate was not installed automatically with a running service' }
+          Write-Host 'Signed candidate installed automatically and service is running.'
