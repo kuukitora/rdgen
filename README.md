@@ -48,3 +48,11 @@ msiexec.exe /i ".\client_v1.5.3.msi" /qn /norestart LAUNCH_TRAY_APP=N
 
 Confirm that the service shows as running in Windows Services, then test from a
 second device after signing out and after restarting the host.
+
+### Enter text at the Windows sign-in screen
+
+Connect from the desktop controller with keyboard input enabled. Click the
+remote username field, copy the username on the controller, then choose
+**Control Actions → Send clipboard keystrokes** in the remote session toolbar.
+Repeat for the password field and submit Windows sign-in manually. This uses
+RustDesk's keyboard input for the focused field.
