@@ -1,13 +1,17 @@
 FROM python:3.13-alpine
 
-RUN adduser -D user
+RUN adduser -D user \
+ && mkdir -p /opt/rdgen \
+ && chown user:user /opt/rdgen
 USER user
 
 WORKDIR /opt/rdgen
 
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY . .
-RUN pip install --no-cache-dir -r requirements.txt \
- && python manage.py migrate
+RUN python manage.py migrate
 
 ENV PYTHONUNBUFFERED=1
 
