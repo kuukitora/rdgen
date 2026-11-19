@@ -126,34 +126,32 @@
     <div>
         <h2 class="success-text">Build Generated Successfully</h2>
         <div class="download-section">
-            {% if platform == 'windows' %}
-                <a href='/download?filename={{filename}}.exe&uuid={{uuid}}' class="download-link">Download {{filename}}.exe</a>
-            {% elif platform == 'windows-x86' %}
-                <a href='/download?filename={{filename}}.exe&uuid={{uuid}}' class="download-link">Download {{filename}}.exe</a>
-            {% elif platform == 'linux' %}
-                <a href='/download?filename={{filename}}-x86_64.deb&uuid={{uuid}}' class="download-link">Download {{filename}}-x86_64.deb</a>
-                <a href='/download?filename={{filename}}-x86_64.rpm&uuid={{uuid}}' class="download-link">Download {{filename}}-x86_64.rpm</a>
-                <a href='/download?filename={{filename}}-suse-x86_64.rpm&uuid={{uuid}}' class="download-link">Download {{filename}}-suse-x86_64.rpm</a>
-                <a href='/download?filename={{filename}}-x86_64.pkg.tar.zst&uuid={{uuid}}' class="download-link">Download {{filename}}-x86_64.pkg.tar.zst</a>
-                <a href='/download?filename={{filename}}-aarch64.deb&uuid={{uuid}}' class="download-link">Download {{filename}}-aarch64.deb</a>
-                <a href='/download?filename={{filename}}-aarch64.rpm&uuid={{uuid}}' class="download-link">Download {{filename}}-aarch64.rpm</a>
-                <a href='/download?filename={{filename}}-suse-aarch64.rpm&uuid={{uuid}}' class="download-link">Download {{filename}}-suse-aarch64.rpm</a>
-                <a href='/download?filename={{filename}}-aarch64.pkg.tar.zst&uuid={{uuid}}' class="download-link">Download {{filename}}-aarch64.pkg.tar.zst</a>
-                <a href='/download?filename={{filename}}-x86_64.AppImage&uuid={{uuid}}' class="download-link">Download {{filename}}-x86_64.AppImage</a>
-                <a href='/download?filename={{filename}}-aarch64.AppImage&uuid={{uuid}}' class="download-link">Download {{filename}}-aarch64.AppImage</a>
-                <a href='/download?filename={{filename}}-x86_64.flatpak&uuid={{uuid}}' class="download-link">Download {{filename}}-x86_64.flatpak</a>
-                <a href='/download?filename={{filename}}-aarch64.flatpak&uuid={{uuid}}' class="download-link">Download {{filename}}-aarch64.flatpak</a>
-            {% elif platform == 'android' %}
-                <a href='/download?filename={{filename}}-aarch64.apk&uuid={{uuid}}' class="download-link">Download {{filename}}-aarch64.apk</a>
-                <a href='/download?filename={{filename}}-x86_64.apk&uuid={{uuid}}' class="download-link">Download {{filename}}-x86_64.apk</a>
-                <a href='/download?filename={{filename}}-armv7.apk&uuid={{uuid}}' class="download-link">Download {{filename}}-armv7.apk</a>
-            {% elif platform == 'macos' %}
-                <a href='/download?filename={{filename}}-x86_64.dmg&uuid={{uuid}}' class="download-link">Download {{filename}}-x86_64.dmg</a>
-                <a href='/download?filename={{filename}}-aarch64.dmg&uuid={{uuid}}' class="download-link">Download {{filename}}-aarch64.dmg</a>
+            {% if existing_files %}
+                {% for f in existing_files %}
+                    {% if platform == 'windows' and f|slice:"-4:" == '.msi' %}
+                        <a href='/download?filename={{ f|urlencode }}&amp;uuid={{ uuid }}' class="download-link">Download Windows installer (.msi)</a>
+                        <p>For incoming connections at the Windows sign-in screen, install this package with administrator rights. It installs the Windows service.</p>
+                    {% else %}
+                        <a href='/download?filename={{ f|urlencode }}&amp;uuid={{ uuid }}' class="download-link">Download {{ f }}</a>
+                    {% endif %}
+                {% endfor %}
             {% else %}
-                <p>Error: No file generated</p>
+                <p>No files available for download.</p>
             {% endif %}
         </div>
+
+        {% if missing_files %}
+        <div class="failed-section">
+            <h3 style="color: #d32f2f; margin-top: 20px;">Failed Builds</h3>
+            <p>The following files were not generated (the build for these may have failed):</p>
+            <ul style="text-align: left; display: inline-block; margin: 0 auto;">
+                {% for f in missing_files %}
+                    <li style="color: #d32f2f;">{{ f }}</li>
+                {% endfor %}
+            </ul>
+            <p>View full build log: <a href="{{ github_log_url }}" target="_blank" style="color: #3498db;">GitHub Actions Run</a></p>
+        </div>
+        {% endif %}
     </div>
 
     <div id="platformNote" class="platform-note"></div>
@@ -181,8 +179,6 @@
             } else if (platform === 'windows' || platform === 'windows-x86') {
                 document.getElementById('pageTitle').textContent = 'Windows Build Generated';
                 platformLogos.windows.style.display = 'block';
-                platformNote.textContent = 'Note: You might need to disable SmartScreen or adjust Windows security settings.';
-                platformNote.style.display = 'block';
             } else if (platform === 'linux') {
                 document.getElementById('pageTitle').textContent = 'Linux Build Generated';
                 platformLogos.linux.style.display = 'block';

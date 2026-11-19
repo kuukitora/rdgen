@@ -3,11 +3,20 @@
 The client generator is currently hosted [here](https://rdgen.crayoneater.org).
 If you would like to host the generator yourself, see [here](setup.md)
 
+## rustdesk api server integration
+
+The rdgen client generator is integrated into my fork of the [rustdesk-api](https://github.com/bryangerlach/rustdesk-api). This is currently a work in progress, and might have bugs.
+
+## rdgen local build alternative
+
+If you would prefer to build rustdesk on your own computer, check out the [DVForge](https://github.com/VenimK/DVForge) project.
+
 ## Features
 
 - Embed server and key into client
 - Custom app name
 - Custom icon/logo
+- Custom theme colors (accent, light/dark surfaces, ID/“me” color)
 - Set default settings for the client
 - Support for rustdesk advanced settings (https://rustdesk.com/docs/en/self-host/client-configuration/advanced-settings/)
 
@@ -20,4 +29,22 @@ Save your configuration from the rdgen web interface, or generate your own, then
 - Icons should be square (256x256 recommended)
 - Avoid special characters or non-English characters in app name and file name
 - Build time is currently 30 - 45 minutes
+- Permissions and security settings are written to `override-settings`, so they also apply to machines that already have a saved RustDesk configuration and cannot be changed by the client. The old Default/Override selector for permissions was removed.
+- A permanent password baked into a client is always accepted, even if the machine already has a local permanent password. Setting one also selects permanent-password verification.
 
+## Windows service installation
+
+For a Windows x64 client that accepts incoming connections, leave installation
+enabled and download the MSI from the generation results. Run it as an
+administrator. The package installs the Windows service so the client can accept
+connections at the sign-in screen before a user logs in.
+
+For managed installation without launching the client interface, run this from
+an elevated shell. Substitute the downloaded MSI filename.
+
+```powershell
+msiexec.exe /i ".\client_v1.5.3.msi" /qn /norestart LAUNCH_TRAY_APP=N
+```
+
+Confirm that the service shows as running in Windows Services, then test from a
+second device after signing out and after restarting the host.
