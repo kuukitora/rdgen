@@ -619,15 +619,40 @@ jobs:
           APP_VERSION: ${{ inputs.app_version }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          $msiArgs = @('--app-name', $env:appname, '--arp', '-d', '../../rustdesk')
-          # Match the packaged client's connection mode. Outgoing-only clients
-          # should not create an inbound Windows service.
+          $msiAppName = 'RustDesk'
+          $connectionType = $null
           if ($env:custom) {
             $settingsJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:custom))
-            $connectionType = (ConvertFrom-Json -InputObject $settingsJson).'conn-type'
-            if ($connectionType -in @('incoming', 'outgoing')) {
-              $msiArgs += @('--conn-type', $connectionType)
+            $settings = ConvertFrom-Json -InputObject $settingsJson
+            $connectionType = $settings.'conn-type'
+            if ($settings.'app-name') {
+              $msiAppName = $settings.'app-name'
             }
+          }
+
+          # RustDesk registers its service dispatcher under the runtime app name.
+          # Use the same name for the MSI service, installation keys and executable.
+          if ($msiAppName -match '[<>:"/\\|?*;\p{Cc}]|[ .]$') {
+            throw 'The application name cannot be used as a Windows service and executable name.'
+          }
+          if ($msiAppName -ne $env:appname) {
+            Rename-Item -LiteralPath "./rustdesk/$env:appname.exe" -NewName "$msiAppName.exe"
+          }
+
+          # The upstream preprocessor runs build-date/version probes through a shell.
+          # Pass a discrete executable path so names with spaces work correctly.
+          $preprocessor = './res/msi/preprocess.py'
+          $script = Get-Content -LiteralPath $preprocessor -Raw
+          $probe = 'f"{dist_app} {args}",'
+          if (-not $script.Contains($probe)) {
+            throw 'The RustDesk MSI preprocessor changed its executable probe.'
+          }
+          $script.Replace($probe, '[str(dist_app), args],').Replace('shell=True,', 'shell=False,') |
+            Set-Content -LiteralPath $preprocessor -NoNewline
+
+          $msiArgs = @('--app-name', $msiAppName, '--arp', '-d', '../../rustdesk')
+          if ($connectionType -in @('incoming', 'outgoing')) {
+            $msiArgs += @('--conn-type', $connectionType)
           }
           # Windows Installer requires a numeric product version.
           if ($env:APP_VERSION -match '^(\d+\.\d+\.\d+)') {
