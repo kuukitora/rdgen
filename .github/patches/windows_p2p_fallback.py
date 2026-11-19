@@ -32,6 +32,14 @@ def patch(root):
     source = replace_once(source,
         '                                conn = relay_conn;\n                                typ = "Relay";',
         '                                conn = relay_conn;\n                                kcp = None;\n                                typ = "Relay";')
+    # A policy-forced relay can replace an already established KCP transport.
+    # Do not keep the abandoned KCP endpoint alive for the relay session.
+    force_start = source.index('        if (interface.is_force_relay() && typ != "WebRTC") || conn.is_err() {')
+    force_end = source.index('        let mut conn = conn?;', force_start)
+    section = replace_once(source[force_start:force_end],
+        '                typ = "Relay";\n                direct = false;',
+        '                kcp = None;\n                typ = "Relay";\n                direct = false;')
+    source = source[:force_start] + section + source[force_end:]
     start = source.index('        let res = Self::secure_connection(peer_id, signed_id_pk.clone(), key, &mut conn).await;')
     end = source.index('        if typ == "WebRTC" {', start)
     section = replace_once(source[start:end],
