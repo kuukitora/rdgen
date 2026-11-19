@@ -814,6 +814,40 @@ jobs:
             Rename-Item -LiteralPath ./SignOutput/rustdesk.msi -NewName "$env:filename.msi"
           }
 
+      - name: Encrypt fallback Windows downloads
+        if: env.rdgen == 'true'
+        shell: python
+        env:
+          RDGEN_ARTIFACT_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
+        run: |
+          import os
+          from pathlib import Path
+          import pyzipper
+
+          filename = os.environ["filename"]
+          password = os.environ["RDGEN_ARTIFACT_PASSWORD"].encode()
+          if not password:
+              raise RuntimeError("ZIP_PASSWORD is required for the encrypted fallback.")
+          with pyzipper.AESZipFile(
+              "rdgen-windows-downloads.zip", "w",
+              compression=pyzipper.ZIP_STORED, encryption=pyzipper.WZ_AES,
+          ) as archive:
+              archive.setpassword(password)
+              for extension in ("exe", "msi"):
+                  package = Path("SignOutput") / f"{filename}.{extension}"
+                  if package.is_file():
+                      archive.write(package, arcname=package.name)
+
+      - name: Retain encrypted Windows downloads
+        if: env.rdgen == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: rdgen-windows-encrypted
+          path: rdgen-windows-downloads.zip
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
       - name: Send Windows downloads to RDGen
         if: env.rdgen == 'true'
         uses: nick-fields/retry@v4
@@ -825,13 +859,13 @@ jobs:
           command: |
             upload() {
               curl --fail-with-body --connect-timeout 30 --max-time 600 \
-                -H "Authorization: Bearer $token" -F "file=@$1" -F "uuid=$uuid" \
+                -H "Expect:" -H "Authorization: Bearer $token" -F "file=@$1" -F "uuid=$uuid" \
                 "${{ secrets.GENURL }}/save_custom_client"
             }
-            upload "./SignOutput/$filename.exe" || exit $?
             if [ -f "./SignOutput/$filename.msi" ]; then
-              upload "./SignOutput/$filename.msi"
+              upload "./SignOutput/$filename.msi" || exit $?
             fi
+            upload "./SignOutput/$filename.exe"
 
       - name: Send Windows downloads to the API server
         if: env.rdgen == 'false'
