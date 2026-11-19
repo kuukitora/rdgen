@@ -480,26 +480,26 @@ jobs:
       - name: Install vcpkg dependencies
         env:
           VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.job.vcpkg-triplet }}
-          run: |
-            for attempt in 1 2 3; do
-              if "$VCPKG_ROOT/vcpkg" install \
-                --triplet ${{ matrix.job.vcpkg-triplet }} \
-                --x-install-root="$VCPKG_ROOT/installed"; then
-                break
-              fi
-              if [ "$attempt" -eq 3 ]; then
-                find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
-                  echo "$_1:"
-                  echo "======"
-                  cat "$_1"
-                  echo "======"
-                  echo ""
-                done
-                exit 1
-              fi
-              echo "Dependency installation failed; retrying after a short delay ($attempt/3)."
-              sleep 30
-            done
+        run: |
+          for attempt in 1 2 3; do
+            if "$VCPKG_ROOT/vcpkg" install \
+              --triplet ${{ matrix.job.vcpkg-triplet }} \
+              --x-install-root="$VCPKG_ROOT/installed"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
+                echo "$_1:"
+                echo "======"
+                cat "$_1"
+                echo "======"
+                echo ""
+              done
+              exit 1
+            fi
+            echo "Dependency installation failed; retrying after a short delay ($attempt/3)."
+            sleep 30
+          done
           head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
         shell: bash
 
