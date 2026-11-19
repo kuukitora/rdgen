@@ -147,6 +147,7 @@ def patch_updates(root, feed, public_key):
     patch_release_validation(root, feed)
     patch_artifact_location(root, feed)
     patch_trusted_key(root, key)
+    patch_verified_msi_name(root)
 
     for relative in ("src/updater.rs", "src/flutter_ffi.rs"):
         path = root / relative
@@ -161,6 +162,69 @@ def patch_updates(root, feed, public_key):
                           "    if !update_msi { return Ok(()); }\n    do_check_software_update()?;",
                           "installed MSI update guard")
     updater.write_text(source, encoding="utf-8")
+
+
+def patch_verified_msi_name(root):
+    """Allow spaces only in the verified MSI handoff, whose command omits the name."""
+    handoff = root / "src/platform/windows/installer_handoff.rs"
+    source = handoff.read_text(encoding="utf-8")
+    old = '''pub(super) fn run_cmds(cmds: impl Into<InstallCommands>, show: bool, tip: &str) -> ResultType<()> {
+    validate_install_app_name(&crate::get_app_name())?;
+    let path = directory::path()?.with_extension("bat");'''
+    new = '''fn validate_verified_msi_app_name(name: &str) -> ResultType<()> {
+    let mut bytes = name.bytes();
+    let Some(first) = bytes.next() else { bail!("Application name must not be empty."); };
+    if !(first.is_ascii_alphanumeric() || first == b'_' || first == b'-')
+        || name.ends_with(' ')
+        || !bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b' ')
+    {
+        bail!("Unsafe application name for verified MSI update.");
+    }
+    Ok(())
+}
+
+pub(super) fn run_verified_msi_cmds(cmds: impl Into<InstallCommands>, show: bool, tip: &str) -> ResultType<()> {
+    validate_verified_msi_app_name(&crate::get_app_name())?;
+    run_cmds_inner(cmds, show, tip)
+}
+
+pub(super) fn run_cmds(cmds: impl Into<InstallCommands>, show: bool, tip: &str) -> ResultType<()> {
+    validate_install_app_name(&crate::get_app_name())?;
+    run_cmds_inner(cmds, show, tip)
+}
+
+fn run_cmds_inner(cmds: impl Into<InstallCommands>, show: bool, tip: &str) -> ResultType<()> {
+    let path = directory::path()?.with_extension("bat");'''
+    source = replace_once(source, old, new, "verified MSI handoff name validation")
+    marker = '    #[test]\n    fn protected_handoff_preserves_shortcuts_failures_and_cleanup()'
+    tests = '''    #[test]
+    fn verified_msi_names_allow_spaces_but_reject_shell_metacharacters() {
+        for name in ["Arcade Connect", "Arcade Connect Admin", "RustDesk", "-Client"] {
+            assert!(validate_verified_msi_app_name(name).is_ok(), "{name}");
+        }
+        for name in ["", " leading", "trailing ", "name&cmd", "name|cmd", "name%PATH%", "name\\\"x", "name.x"] {
+            assert!(validate_verified_msi_app_name(name).is_err(), "{name}");
+        }
+    }
+
+'''
+    source = replace_once(source, marker, tests + marker, "verified MSI name tests")
+    handoff.write_text(source, encoding="utf-8")
+
+    verified = root / "src/platform/windows/verified_update.rs"
+    source = verified.read_text(encoding="utf-8")
+    source = replace_once(source, 'installer_handoff::{run_cmds, InstallCommands},',
+                          'installer_handoff::{run_cmds, run_verified_msi_cmds, InstallCommands},',
+                          'verified MSI handoff import')
+    source = replace_once(source,
+        '''    run_cmds(
+        InstallCommands {
+            script: verified_msi_install_commands(update.path(), quiet)?,''',
+        '''    run_verified_msi_cmds(
+        InstallCommands {
+            script: verified_msi_install_commands(update.path(), quiet)?,''',
+        'verified MSI handoff call')
+    verified.write_text(source, encoding="utf-8")
 
 
 def patch_release_validation(root, feed):
