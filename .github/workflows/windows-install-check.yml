@@ -1,5 +1,16 @@
 name: Verify candidate Windows installer
 on:
+  workflow_call:
+    inputs:
+      source_run:
+        required: true
+        type: string
+      app_name:
+        required: true
+        type: string
+    secrets:
+      ZIP_PASSWORD:
+        required: true
   workflow_dispatch:
     inputs:
       source_run:
