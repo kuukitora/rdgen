@@ -248,3 +248,44 @@ class WindowsUpdateTests(SimpleTestCase):
         self.assertEqual(variables["rdgen_update_base"], "https://rdgen.example.com:8443" + self.host_route)
         self.assertEqual(custom["override-settings"]["allow-auto-update"], "Y")
         self.assertNotIn("test-build-token", json.dumps(variables))
+
+
+class WindowsInventoryConfigurationTests(SimpleTestCase):
+    def test_rejects_insecure_or_unsupported_inventory_configuration(self):
+        from rdgenerator.views import generate_custom_client
+        base = {'exename': 'host', 'version': '1.5.3', 'platform': 'windows',
+                'direction': 'incoming', 'installation': 'installationY'}
+        invalid = [
+            {'inventoryConsole': 'http://example.com'},
+            {'inventoryConsole': 'https://example.com/path'},
+            {'inventoryConsole': 'https://user:secret@example.com'},
+            {'inventoryConsole': 'https://example.com', 'direction': 'outgoing'},
+            {'inventoryConsole': 'https://example.com', 'platform': 'linux'},
+        ]
+        with mock.patch('rdgenerator.views.requests.post') as dispatch:
+            for update in invalid:
+                with self.subTest(update=update):
+                    result = generate_custom_client({**base, **update}, 'https://rdgen.example.com')
+                    self.assertEqual(result['status_code'], 400)
+            dispatch.assert_not_called()
+
+    @override_settings(GENURL='https://rdgen.example.com', PROTOCOL='https')
+    def test_https_origin_is_passed_to_build_without_secrets(self):
+        from rdgenerator.views import generate_custom_client
+        workspace = tempfile.TemporaryDirectory()
+        cwd = os.getcwd()
+        self.addCleanup(workspace.cleanup)
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(workspace.name)
+        response = mock.Mock(status_code=401)
+        with mock.patch('rdgenerator.views.requests.post', return_value=response) as dispatch:
+            generate_custom_client({'exename': 'host', 'version': '1.5.3', 'platform': 'windows',
+                                    'direction': 'incoming', 'installation': 'installationY',
+                                    'inventoryConsole': 'https://rdcon.kura.fun:8443/'},
+                                   'https://rdgen.example.com')
+        inputs = dispatch.call_args.kwargs['json']['inputs']
+        zipname = json.loads(inputs['zip_url'])['file']
+        with pyzipper.AESZipFile(Path('temp_zips') / zipname) as archive:
+            archive.setpassword(settings.ZIP_PASSWORD.encode())
+            variables = json.loads(archive.read('secrets.json'))
+        self.assertEqual(variables['inventoryConsole'], 'https://rdcon.kura.fun:8443')

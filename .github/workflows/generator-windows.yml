@@ -131,7 +131,11 @@ jobs:
 
       - name: Preserve RDGen's Windows deployment script
         shell: pwsh
-        run: Copy-Item -LiteralPath ./.github/patches/windows_deployment.py -Destination "$env:RUNNER_TEMP/rdgen-windows-deployment.py"
+        run: |
+          Copy-Item -LiteralPath ./.github/patches/windows_deployment.py -Destination "$env:RUNNER_TEMP/rdgen-windows-deployment.py"
+          Copy-Item -LiteralPath ./.github/patches/windows_inventory.py -Destination "$env:RUNNER_TEMP/rdgen-windows-inventory.py"
+          Copy-Item -LiteralPath ./.github/patches/rdgen_inventory.rs -Destination "$env:RUNNER_TEMP/rdgen-inventory.rs"
+          Copy-Item -LiteralPath ./.github/patches/windows_p2p_fallback.py -Destination "$env:RUNNER_TEMP/rdgen-windows-p2p-fallback.py"
 
       - name: Checkout source code
         if: ${{ env.VERSION != 'master' }}
@@ -149,18 +153,27 @@ jobs:
           submodules: recursive
 
       - name: Set custom app version
-        continue-on-error: true
         if: ${{ inputs.app_version != '' }}
         shell: bash
         run: |
           sed -i -e 's|^version = ".*"|version = "${{ inputs.app_version }}"|' ./Cargo.toml
           sed -i '/name = "rustdesk"/ {n; s/version = ".*"/version = "${{ inputs.app_version }}"/}' ./Cargo.lock
-          grep '^version = ' ./Cargo.toml
+          grep -Fx 'version = "${{ inputs.app_version }}"' ./Cargo.toml
 
       - name: Configure RDGen signed Windows updates
         if: env.rdgen_update_base != ''
         shell: pwsh
         run: python "$env:RUNNER_TEMP/rdgen-windows-deployment.py" update --feed "$env:rdgen_update_base" --public-key "$env:rdgen_update_key"
+
+      - name: Embed BetterDesk inventory into Windows service
+        if: env.inventoryConsole != ''
+        shell: pwsh
+        run: python "$env:RUNNER_TEMP/rdgen-windows-inventory.py" --root . --template "$env:RUNNER_TEMP/rdgen-inventory.rs" --origin "$env:inventoryConsole"
+
+      - name: Fall back to relay if a direct handshake fails
+        if: env.VERSION == '1.5.3'
+        shell: pwsh
+        run: python "$env:RUNNER_TEMP/rdgen-windows-p2p-fallback.py" --root .
 
       - name: Apply allow_custom_update patch
         continue-on-error: true

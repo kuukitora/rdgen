@@ -495,6 +495,9 @@
                     {{ form.key }}<br><br>
                     <label for="{{ form.apiServer.id_for_label }}">API:</label>
                     {{ form.apiServer }}<br><br>
+                    <label for="{{ form.inventoryConsole.id_for_label }}">BetterDesk inventory console (HTTPS origin, optional):</label>
+                    {{ form.inventoryConsole }}
+                    <span class="help-text">For an installed Windows Host, enables background device inventory through its existing service.</span><br><br>
                     <label for="{{ form.urlLink.id_for_label }}">Custom URL for links (replaces https://rustdesk.com):</label>
                     {{ form.urlLink }}<br><br>
                     <label for="{{ form.downloadLink.id_for_label }}">Custom URL for downloading updates (replaces https://rustdesk.com/download):</label>

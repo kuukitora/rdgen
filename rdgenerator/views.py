@@ -18,7 +18,7 @@ from .forms import GenerateForm, HEX_COLOR_RE
 from .models import GithubRun
 from .updates import channel_config, version_order
 from PIL import Image
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,24 @@ def generate_custom_client(params, full_url):
     serverPort = params.get('serverPort', '')
     key = params.get('key', '')
     apiServer = params.get('apiServer', '')
+    inventory_console = params.get('inventoryConsole', '')
+    if inventory_console:
+        try:
+            parsed = urlsplit(inventory_console.strip())
+            port = parsed.port
+            host = parsed.hostname or ''
+            valid_host = bool(host) and all(c.isascii() and (c.isalnum() or c in '.-') for c in host)
+            if (parsed.scheme != 'https' or not valid_host or parsed.username or parsed.password
+                    or parsed.path not in ('', '/') or parsed.query or parsed.fragment
+                    or (port is not None and not 1 <= port <= 65535)):
+                raise ValueError('Inventory console must be an HTTPS origin without credentials or a path.')
+            if (platform != 'windows' or version != '1.5.3'
+                    or params.get('installation', 'installationY') != 'installationY'
+                    or params.get('direction', 'both') == 'outgoing'):
+                raise ValueError('Inventory requires an installed Windows x64 RustDesk 1.5.3 client that accepts connections.')
+            inventory_console = 'https://' + host.lower() + (':' + str(port) if port else '')
+        except (ValueError, TypeError, AttributeError) as exc:
+            return {'success': False, 'error': str(exc), 'status_code': 400}
     urlLink = params.get('urlLink', '')
     downloadLink = params.get('downloadLink', '')
     if not server:
@@ -375,6 +393,7 @@ def generate_custom_client(params, full_url):
         "serverPort":serverPort,
         "key":key,
         "apiServer":apiServer,
+        "inventoryConsole":inventory_console,
         "custom":encodedCustom,
         "uuid":myuuid,
         "iconlink_url":iconlink_url,

@@ -22,6 +22,12 @@ def prepare_msi(root):
     )
     if count != 2:
         raise ValueError("RustDesk's MSI application launch actions have changed.")
+    # An old user profile can retain stop-service=Y after uninstall. For these
+    # service installers that must not silently suppress service creation.
+    service_condition = '(NOT STOP_SERVICE=&quot;&apos;Y&apos;&quot;) AND '
+    if source.count(service_condition) != 2:
+        raise ValueError("RustDesk's MSI service creation conditions have changed.")
+    source = source.replace(service_condition, '')
     components.write_text(source, encoding="utf-8")
 
     shortcuts = package / "Fragments/ShortcutProperties.wxs"
@@ -29,6 +35,99 @@ def prepare_msi(root):
     source = replace_once(source, 'Id="STARTUPSHORTCUTS" Value="1"',
                           'Id="STARTUPSHORTCUTS" Value="0"', "MSI logon shortcut setting")
     shortcuts.write_text(source, encoding="utf-8")
+
+    actions = package / 'Fragments/CustomActions.wxs'
+    source = actions.read_text(encoding='utf-8')
+    source = replace_once(source,
+        'DllEntry="CreateStartService" Impersonate="no" Execute="deferred" Return="ignore"',
+        'DllEntry="CreateStartService" Impersonate="no" Execute="deferred" Return="check"',
+        'MSI service action error handling')
+    actions.write_text(source, encoding='utf-8')
+
+    service_utils = root / 'res/msi/CustomActions/ServiceUtils.cpp'
+    source = service_utils.read_text(encoding='utf-8')
+    source = replace_once(source,
+        '    SERVICE_STATUS_PROCESS serviceStatus;\n    QueryServiceStatusExW(serviceName, &serviceStatus);\n    return (serviceStatus.dwCurrentState == SERVICE_RUNNING);',
+        '    SERVICE_STATUS_PROCESS serviceStatus = {};\n    if (!QueryServiceStatusExW(serviceName, &serviceStatus)) return false;\n    return (serviceStatus.dwCurrentState == SERVICE_RUNNING);',
+        'MSI service status query')
+    service_utils.write_text(source, encoding='utf-8')
+
+    cpp = root / 'res/msi/CustomActions/CustomActions.cpp'
+    source = cpp.read_text(encoding='utf-8')
+    marker = 'void TryCreateStartServiceByShell(LPWSTR svcName, LPWSTR svcBinary, LPWSTR szSvcDisplayName);'
+    helper = '''// Confirm an existing service is the service this MSI is installing.
+// A running service with the same name but an old executable must not count.
+bool RdgenServiceMatches(LPCWSTR name, LPCWSTR binary) {
+    SC_HANDLE manager = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT);
+    if (!manager) return false;
+    SC_HANDLE service = OpenServiceW(manager, name, SERVICE_QUERY_CONFIG);
+    if (!service) { CloseServiceHandle(manager); return false; }
+    DWORD bytes = 0;
+    QueryServiceConfigW(service, NULL, 0, &bytes);
+    LPQUERY_SERVICE_CONFIGW config = bytes ? (LPQUERY_SERVICE_CONFIGW)LocalAlloc(LPTR, bytes) : NULL;
+    bool matches = config && QueryServiceConfigW(service, config, bytes, &bytes)
+        && config->dwStartType == SERVICE_AUTO_START
+        && config->lpServiceStartName && _wcsicmp(config->lpServiceStartName, L"LocalSystem") == 0
+        && config->lpBinaryPathName && _wcsicmp(config->lpBinaryPathName, binary) == 0;
+    if (config) LocalFree(config);
+    CloseServiceHandle(service);
+    CloseServiceHandle(manager);
+    return matches;
+}
+
+'''
+    source = replace_once(source, marker, helper + marker, 'MSI service configuration check')
+    source = replace_once(source,
+        '        WcaLog(LOGMSG_STANDARD, "Failed to find binary : %ls", svcParams);\n        goto LExit;',
+        '        WcaLog(LOGMSG_STANDARD, "Failed to find binary : %ls", svcParams);\n        hr = E_INVALIDARG;\n        goto LExit;',
+        'MSI invalid service parameters')
+    source = replace_once(source, r'L"create %ls binpath=', r'L"create \"%ls\" binpath=', 'MSI service name quoting')
+    source = replace_once(source, r'L"/c sc start %ls"', r'L"/c sc start \"%ls\""', 'MSI service start quoting')
+    source = replace_once(source, r'L"/c sc stop %ls"', r'L"/c sc stop \"%ls\""', 'MSI service stop quoting')
+    source = replace_once(source, r'L"/c sc delete %ls"', r'L"/c sc delete \"%ls\""', 'MSI service removal quoting')
+    source = replace_once(source,
+        '    if (IsServiceRunningW(svcName)) {\n        WcaLog(LOGMSG_STANDARD, "Service \\"%ls\\" is running.", svcName);',
+        '''    // StartServiceW may return while the service is still START_PENDING.
+    // Allow it time to finish before the shell fallback deletes/recreates it.
+    if (RdgenServiceMatches(svcName, svcBinary) && !IsServiceRunningW(svcName)) {
+        MyStartServiceW(svcName);
+        for (int attempt = 0; attempt < 150 && !IsServiceRunningW(svcName); ++attempt) {
+            Sleep(200);
+        }
+    }
+    if (IsServiceRunningW(svcName) && RdgenServiceMatches(svcName, svcBinary)) {
+        WcaLog(LOGMSG_STANDARD, "Service \\"%ls\\" is running.", svcName);''',
+        'MSI existing service configuration validation')
+    fallback = '        TryCreateStartServiceByShell(svcName, svcBinary, szSvcDisplayName);\n    }\n\nLExit:'
+    checked = '''        TryCreateStartServiceByShell(svcName, svcBinary, szSvcDisplayName);
+    }
+    // Shell fallback is asynchronous; wait for SCM to report RUNNING rather
+    // than returning a successful installation with no usable service.
+    for (int attempt = 0; attempt < 150 && !(IsServiceRunningW(svcName) && RdgenServiceMatches(svcName, svcBinary)); ++attempt) {
+        Sleep(200);
+    }
+    if (!(IsServiceRunningW(svcName) && RdgenServiceMatches(svcName, svcBinary))) {
+        WcaLog(LOGMSG_STANDARD, "Service did not reach RUNNING with the expected executable and automatic start.");
+        MSIHANDLE message = MsiCreateRecord(1);
+        if (message) {
+            MsiRecordSetStringW(message, 0, L"The background service could not start with the expected configuration. Installation cannot complete. Check Windows services and security software restrictions, then retry with administrator privileges. If it still fails, run msiexec /i <installer.msi> /L*v <logfile> and send the log to support.");
+            MsiProcessMessage(hInstall, INSTALLMESSAGE_ERROR, message);
+            MsiCloseHandle(message);
+        }
+        hr = HRESULT_FROM_WIN32(ERROR_SERVICE_NOT_ACTIVE);
+    }
+
+LExit:'''
+    english_help = ('The background service could not start with the expected configuration. '
+                    'Installation cannot complete. Check Windows services and security software restrictions, '
+                    'then retry with administrator privileges. If it still fails, run msiexec /i <installer.msi> '
+                    '/L*v <logfile> and send the log to support.')
+    chinese_help = ('后台服务未能按预期启动，安装无法完成。请检查 Windows 服务及安全软件限制，'
+                    '然后以管理员权限重试。如仍失败，请运行 msiexec /i <安装包路径> /L*v <日志路径> '
+                    '并将日志交给技术支持。')
+    checked = checked.replace(english_help, chinese_help.encode('unicode_escape').decode('ascii'))
+    source = replace_once(source, fallback, checked, 'MSI service startup verification')
+    cpp.write_text(source, encoding='utf-8')
 
 
 def patch_updates(root, feed, public_key):

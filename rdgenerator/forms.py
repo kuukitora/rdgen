@@ -46,6 +46,7 @@ class GenerateForm(forms.Form):
     serverIP = forms.CharField(label="Host", required=False)
     serverPort = forms.CharField(label="Port", required=False)
     apiServer = forms.CharField(label="API Server", required=False)
+    inventoryConsole = forms.URLField(label="BetterDesk inventory console HTTPS origin", required=False)
     key = forms.CharField(label="Key", required=False)
     urlLink = forms.CharField(label="Custom URL for links", required=False)
     downloadLink = forms.CharField(label="Custom URL for downloading new versions", required=False)
