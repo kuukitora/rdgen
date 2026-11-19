@@ -8,6 +8,10 @@ on:
       app_name:
         required: true
         type: string
+      live_probe:
+        required: false
+        type: boolean
+        default: false
     secrets:
       ZIP_PASSWORD:
         required: true
@@ -58,12 +62,15 @@ jobs:
         shell: pwsh
         env:
           APP_NAME: ${{ inputs.app_name }}
+          LIVE_PROBE: ${{ inputs.live_probe }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:APP_NAME -notin @('Arcade Connect', 'Arcade Connect Admin')) { throw 'Unexpected application name' }
           $msi = (Resolve-Path candidate/candidate.msi).Path
           $exe = Join-Path $env:ProgramFiles "$env:APP_NAME\$env:APP_NAME.exe"
-          New-NetFirewallRule -DisplayName 'RDGen isolated installer validation' -Direction Outbound -Action Block -Program $exe | Out-Null
+          if ($env:LIVE_PROBE -ne 'true') {
+            New-NetFirewallRule -DisplayName 'RDGen isolated installer validation' -Direction Outbound -Action Block -Program $exe | Out-Null
+          }
           function Install-Candidate {
             $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart', '/L*v', "`"$env:RUNNER_TEMP\rdgen-install.log`"") -Wait -PassThru
             if ($p.ExitCode -ne 0) { throw "MSI installation failed with exit code $($p.ExitCode)." }
@@ -73,6 +80,26 @@ jobs:
             }
           }
           Install-Candidate
+          if ($env:LIVE_PROBE -eq 'true') {
+            $deviceId = ''
+            for ($attempt = 0; $attempt -lt 60; $attempt++) {
+              $deviceId = (& $exe --get-id | Out-String).Trim()
+              if ($deviceId -match '^\d{3,20}$') { break }
+              Start-Sleep -Seconds 2
+            }
+            if ($deviceId -notmatch '^\d{3,20}$') { throw 'Host did not report a device ID.' }
+            Write-Host "Temporary test device ID: $deviceId"
+            $online = $false
+            for ($attempt = 0; $attempt -lt 90; $attempt++) {
+              try {
+                $peer = Invoke-RestMethod -Uri "https://rdcon.kura.fun:8443/api/bd/peer/$deviceId" -Headers @{'X-Device-Id' = $deviceId} -TimeoutSec 10
+                if ($peer.peer.online -eq $true) { $online = $true; break }
+              } catch { }
+              Start-Sleep -Seconds 2
+            }
+            if (!$online) { throw 'Embedded inventory agent did not authenticate to the console.' }
+            Write-Host 'Embedded inventory agent authenticated to the console.'
+          }
           Restart-Service -Name $env:APP_NAME
           if ((Get-Service -Name $env:APP_NAME).Status -ne 'Running') { throw 'Service did not restart.' }
           Install-Candidate
