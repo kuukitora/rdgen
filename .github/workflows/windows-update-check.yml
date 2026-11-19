@@ -82,5 +82,26 @@ jobs:
             Start-Sleep -Seconds 3
           }
           if (Test-Path candidate/requests.log) { Get-Content candidate/requests.log | Sort-Object -Unique }
-          if (!$updated) { throw 'Candidate was not installed automatically with a running service' }
+          if (!$updated) {
+            $matchesCandidate = (Test-Path $exe) -and (Get-FileHash -Algorithm SHA256 $exe).Hash -eq $expectedHash
+            Write-Host "Installed executable matches candidate: $matchesCandidate"
+            $service = Get-CimInstance Win32_Service -Filter "Name='$env:APP_NAME'"
+            if ($service) { Write-Host "Service state: $($service.State); start mode: $($service.StartMode); exit code: $($service.ExitCode)" }
+            else { Write-Host 'Service is absent.' }
+            $roots = @((Join-Path $env:windir 'ServiceProfiles\LocalService\AppData\Roaming'), (Join-Path $env:windir 'System32\config\systemprofile\AppData\Roaming'))
+            foreach ($root in $roots) {
+              if (Test-Path $root) {
+                Get-ChildItem -Path $root -Filter '*.log' -File -Recurse -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -like "*$env:APP_NAME*" -and $_.Length -lt 10MB } |
+                  ForEach-Object {
+                    Select-String -Path $_.FullName -Pattern 'Error checking for updates|Failed to install the new msi|Refusing to update|New version is downloaded|New version .* updated' -ErrorAction SilentlyContinue |
+                      Select-Object -Last 10 | ForEach-Object {
+                        $safe = $_.Line -replace 'https?://\S+', '[url]' -replace '[A-Za-z0-9+/=_-]{40,}', '[redacted]'
+                        Write-Host $safe
+                      }
+                  }
+              }
+            }
+            throw 'Candidate was not installed automatically with a running service'
+          }
           Write-Host 'Signed candidate installed automatically and service is running.'
