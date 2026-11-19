@@ -2,7 +2,7 @@
 //! This module is enabled only when an HTTPS console endpoint was configured at build time.
 
 use hbb_common::{base64::{engine::general_purpose::STANDARD, Engine as _},
-    config::Config, sodiumoxide::crypto::sign, websocket::WsFramedStream};
+    config::Config, log, sodiumoxide::crypto::sign, tokio, websocket::WsFramedStream};
 use serde_json::{json, Value};
 use std::{os::windows::fs::MetadataExt, path::{Component, Path}, time::Duration};
 use tokio::{process::Command, time::{sleep, timeout}};
