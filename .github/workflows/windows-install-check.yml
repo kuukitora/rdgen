@@ -92,7 +92,7 @@ jobs:
             # Give the service time to register its RustDesk key and connect.
             # Authentication must be confirmed in the console's server log;
             # its legacy /api/bd/peer endpoint reads a separate database.
-            Start-Sleep -Seconds 90
+            Start-Sleep -Seconds 180
             $logRoot = Join-Path $env:windir 'ServiceProfiles\LocalService\AppData\Roaming'
             if (Test-Path $logRoot) {
               Get-ChildItem -Path $logRoot -Filter '*.log' -File -Recurse -ErrorAction SilentlyContinue |
