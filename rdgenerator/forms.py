@@ -49,6 +49,17 @@ class GenerateForm(forms.Form):
     key = forms.CharField(label="Key", required=False)
     urlLink = forms.CharField(label="Custom URL for links", required=False)
     downloadLink = forms.CharField(label="Custom URL for downloading new versions", required=False)
+    windowsUpdateChannel = forms.ChoiceField(
+        label="Windows automatic updates", required=False,
+        choices=[("", "Off"), ("host", "Host"), ("admin", "Admin")],
+    )
+    app_version = forms.RegexField(
+        regex=r"[0-9]+\.[0-9]+\.[0-9]+(?:\+[0-9]{3})?\Z",
+        label="Application version", required=False,
+    )
+    windowsUpdateBuildToken = forms.CharField(
+        label="Update channel build token", required=False, widget=forms.PasswordInput,
+    )
     compname = forms.CharField(label="Company name",required=False)
 
     #Visual

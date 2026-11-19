@@ -29,6 +29,16 @@ ZIP_PASSWORD = os.environ.get("ZIP_PASSWORD",'insecure')
 PROTOCOL = os.environ.get("PROTOCOL", 'https')
 REPONAME = os.environ.get("REPONAME", 'rdgen')
 SH_SECRET = os.environ.get('SH_SECRET', 'secret')
+RDGEN_UPDATE_ORIGIN = os.environ.get("RDGEN_UPDATE_ORIGIN", "")
+RDGEN_UPDATE_ROOT = os.environ.get("RDGEN_UPDATE_ROOT", "")
+RDGEN_UPDATE_BUILD_TOKEN = os.environ.get("RDGEN_UPDATE_BUILD_TOKEN", "")
+RDGEN_UPDATE_CHANNELS = {
+    channel: {
+        "access": os.environ.get(f"RDGEN_UPDATE_{channel.upper()}_ACCESS", ""),
+        "public_key": os.environ.get(f"RDGEN_UPDATE_{channel.upper()}_PUBLIC_KEY", ""),
+    }
+    for channel in ("host", "admin")
+}
 # "json": one JSON object per log line; anything else: the message alone, as before
 LOG_FORMAT = os.environ.get("LOG_FORMAT", "text")
 

@@ -2,6 +2,8 @@ import base64
 import json
 import os
 import tempfile
+from contextlib import closing
+from pathlib import Path
 from unittest import mock
 
 import pyzipper
@@ -136,3 +138,113 @@ class GeneratorViewTests(TestCase):
         self.assertEqual(custom['override-settings']['hide-powered-by-me'], 'Y')
         self.assertEqual(secrets['filename'], 'client_v1.5.3')
         self.assertEqual(custom['conn-type'], 'incoming')
+
+class WindowsUpdateTests(SimpleTestCase):
+    def setUp(self):
+        from Cryptodome.PublicKey import ECC
+
+        storage = tempfile.TemporaryDirectory()
+        self.addCleanup(storage.cleanup)
+        root = Path(storage.name)
+        host = ECC.generate(curve="Ed25519")
+        admin = ECC.generate(curve="Ed25519")
+        self.msi = root / "fixture.msi"
+        self.msi.write_bytes(bytes.fromhex("d0cf11e0a1b11ae1") + b"installer fixture")
+        self.signing_key = root / "host.pem"
+        self.signing_key.write_text(host.export_key(format="PEM"), encoding="ascii")
+        self.host_public = host.public_key().export_key(format="raw")
+        options = override_settings(
+            RDGEN_UPDATE_ROOT=str(root / "releases"),
+            RDGEN_UPDATE_ORIGIN="https://rdgen.example.com:8443",
+            RDGEN_UPDATE_BUILD_TOKEN="test-build-token",
+            RDGEN_UPDATE_CHANNELS={
+                "host": {"access": "a" * 64, "public_key": base64.b64encode(self.host_public).decode()},
+                "admin": {
+                    "access": "b" * 64,
+                    "public_key": base64.b64encode(admin.public_key().export_key(format="raw")).decode(),
+                },
+            },
+        )
+        options.enable()
+        self.addCleanup(options.disable)
+        self.host_route = "/updates/host/" + "a" * 64
+        self.admin_route = "/updates/admin/" + "b" * 64
+
+    def test_signed_release_and_channel_isolation(self):
+        import hashlib
+        from Cryptodome.Signature import eddsa
+        from rdgenerator.updates import SIGNATURE_CONTEXT, publish_release
+
+        empty = self.client.post(self.host_route + "/api/version/latest")
+        self.assertTrue(empty.json()["url"].endswith("/v0.0.1"))
+        self.assertEqual(publish_release("host", "1.5.3+021", self.msi, self.signing_key), "v1.5.3+021")
+        latest = self.client.post(self.host_route + "/api/version/latest")
+        self.assertTrue(latest.json()["url"].endswith("/v1.5.3+021"))
+        self.assertEqual(latest["Cache-Control"], "private, no-store")
+
+        release = self.host_route + "/rustdesk/rustdesk/releases/download/v1.5.3+021/"
+        with closing(self.client.get(release + "rustdesk-update.json")) as response:
+            metadata_bytes = b"".join(response.streaming_content)
+        with closing(self.client.get(release + "rustdesk-update.json.sig")) as response:
+            signature = json.loads(b"".join(response.streaming_content))
+        with closing(self.client.get(release + "rustdesk-x86_64.msi")) as response:
+            actual = b"".join(response.streaming_content)
+        eddsa.new(eddsa.import_public_key(self.host_public), "rfc8032").verify(
+            SIGNATURE_CONTEXT + metadata_bytes, base64.b64decode(signature["signature"]),
+        )
+        self.assertEqual(actual, self.msi.read_bytes())
+        self.assertEqual(json.loads(metadata_bytes)["artifacts"][0]["sha256"], hashlib.sha256(actual).hexdigest())
+        self.assertEqual(self.client.post(self.host_route.replace("/host/", "/admin/") + "/api/version/latest").status_code, 404)
+        self.assertEqual(self.client.get(release.replace(self.host_route, self.admin_route) + "rustdesk-x86_64.msi").status_code, 404)
+
+    def test_publish_refuses_wrong_key_and_older_versions(self):
+        from rdgenerator.updates import publish_release
+
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            publish_release("admin", "1.5.3+021", self.msi, self.signing_key)
+        publish_release("host", "1.5.3+021", self.msi, self.signing_key)
+        with self.assertRaisesRegex(ValueError, "newer"):
+            publish_release("host", "1.5.3+019", self.msi, self.signing_key)
+        self.assertEqual(publish_release("host", "1.5.4", self.msi, self.signing_key), "v1.5.4")
+
+    def test_build_token_required_before_dispatch(self):
+        from rdgenerator.views import generate_custom_client
+
+        params = {"windowsUpdateChannel": "host", "version": "1.5.3"}
+        with mock.patch("rdgenerator.views.requests.post") as dispatch:
+            self.assertEqual(generate_custom_client(params, "")["status_code"], 403)
+            params["windowsUpdateBuildToken"] = "test-build-token"
+            params["direction"] = "outgoing"
+            self.assertEqual(generate_custom_client(params, "")["status_code"], 400)
+            dispatch.assert_not_called()
+
+    def test_authorized_update_build_uses_pinned_channel(self):
+        from rdgenerator.views import generate_custom_client
+
+        workspace = tempfile.TemporaryDirectory()
+        cwd = os.getcwd()
+        self.addCleanup(workspace.cleanup)
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(workspace.name)
+        response = mock.Mock(status_code=401)
+        with mock.patch("rdgenerator.views.requests.post", return_value=response) as dispatch:
+            generate_custom_client({
+                "windowsUpdateChannel": "host",
+                "windowsUpdateBuildToken": "test-build-token",
+                "version": "1.5.3",
+                "app_version": "1.5.3+001",
+                "direction": "incoming",
+                "exename": "host",
+                "overrideManual": "allow-auto-update=N",
+            }, "https://rdgen.example.com:8443")
+        inputs = dispatch.call_args.kwargs["json"]["inputs"]
+        self.assertEqual(inputs["app_version"], "1.5.3+001")
+        zipname = json.loads(inputs["zip_url"])["file"]
+        with pyzipper.AESZipFile(Path("temp_zips") / zipname) as archive:
+            archive.setpassword(settings.ZIP_PASSWORD.encode())
+            variables = json.loads(archive.read("secrets.json"))
+        custom = json.loads(base64.b64decode(variables["custom"]))
+        self.assertEqual(variables["filename"], "host_v1.5.3-build001")
+        self.assertEqual(variables["rdgen_update_base"], "https://rdgen.example.com:8443" + self.host_route)
+        self.assertEqual(custom["override-settings"]["allow-auto-update"], "Y")
+        self.assertNotIn("test-build-token", json.dumps(variables))

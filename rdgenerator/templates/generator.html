@@ -499,6 +499,13 @@
                     {{ form.urlLink }}<br><br>
                     <label for="{{ form.downloadLink.id_for_label }}">Custom URL for downloading updates (replaces https://rustdesk.com/download):</label>
                     {{ form.downloadLink }}<br><br>
+                    <label for="{{ form.windowsUpdateChannel.id_for_label }}">Windows automatic updates</label>
+                    {{ form.windowsUpdateChannel }}
+                    <label for="{{ form.app_version.id_for_label }}">Application version</label>
+                    {{ form.app_version }}
+                    <span class="help-text">Requires the Windows x64 MSI and a configured update channel.</span>
+                    <label for="{{ form.windowsUpdateBuildToken.id_for_label }}">Update channel build token</label>
+                    {{ form.windowsUpdateBuildToken }}<br><br>
                     <label for="{{ form.compname.id_for_label }}">Company name for copyright (replaces Purslane Tech Pte. Ltd.):</label>
                     {{ form.compname }}<br><br>
             </div>
@@ -950,7 +957,8 @@
             const form = document.getElementById("myForm"); // Get the form element
 
             // 1. Use FormData for robust data collection (handles most input types):
-            const formDataObj = new FormData(form);  // Create a FormData object
+            const formDataObj = new FormData(form);
+            formDataObj.delete('windowsUpdateBuildToken');
 
             formDataObj.forEach((value, key) => {
                 // File objects stringify to {} and poison saved configs;
@@ -1078,6 +1086,7 @@
                             const skippedKeys = [];
                             for (const key in formData) {
                                 // More robust selector: checks for name OR id
+                                if (key === 'windowsUpdateBuildToken') continue;
                                 const elements = document.querySelectorAll(`[name="${key}"], [id="${key}"]`);
 
                                 if (elements.length > 0) { // Check if any element(s) exist

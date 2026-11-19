@@ -127,6 +127,10 @@ jobs:
         run: |
           echo "STATUS_URL=${{ env.apiServer }}/api/updategh" >> $env:GITHUB_ENV
 
+      - name: Preserve RDGen's Windows deployment script
+        shell: pwsh
+        run: Copy-Item -LiteralPath ./.github/patches/windows_deployment.py -Destination "$env:RUNNER_TEMP/rdgen-windows-deployment.py"
+
       - name: Checkout source code
         if: ${{ env.VERSION != 'master' }}
         uses: actions/checkout@v7
@@ -150,6 +154,11 @@ jobs:
           sed -i -e 's|^version = ".*"|version = "${{ inputs.app_version }}"|' ./Cargo.toml
           sed -i '/name = "rustdesk"/ {n; s/version = ".*"/version = "${{ inputs.app_version }}"/}' ./Cargo.lock
           grep '^version = ' ./Cargo.toml
+
+      - name: Configure RDGen signed Windows updates
+        if: env.rdgen_update_base != ''
+        shell: pwsh
+        run: python "$env:RUNNER_TEMP/rdgen-windows-deployment.py" update --feed "$env:rdgen_update_base" --public-key "$env:rdgen_update_key"
 
       - name: Apply allow_custom_update patch
         continue-on-error: true
@@ -612,13 +621,14 @@ jobs:
         uses: microsoft/setup-msbuild@v3
 
       - name: Build Windows service installer
-        continue-on-error: true
+        continue-on-error: ${{ env.rdgen_update_base == '' }}
         if: env.UPLOAD_ARTIFACT == 'true'
         shell: pwsh
         env:
           APP_VERSION: ${{ inputs.app_version }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
+          python "$env:RUNNER_TEMP/rdgen-windows-deployment.py" msi
           $msiAppName = 'RustDesk'
           $connectionType = $null
           if ($env:custom) {

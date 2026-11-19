@@ -16,6 +16,7 @@ from django.conf import settings as _settings
 from django.db.models import Q
 from .forms import GenerateForm, HEX_COLOR_RE
 from .models import GithubRun
+from .updates import channel_config, version_order
 from PIL import Image
 from urllib.parse import quote
 
@@ -83,6 +84,29 @@ def generate_custom_client(params, full_url):
     hidecm = params.get('hidecm', False)
     removeNewVersionNotif = params.get('removeNewVersionNotif', False)
     update_public_key = params.get('update_public_key', '')
+    rdgen_update_base = ""
+    rdgen_update_key = ""
+    update_channel = params.get("windowsUpdateChannel", "")
+    if update_channel:
+        build_token = params.get("windowsUpdateBuildToken", "")
+        configured_token = _settings.RDGEN_UPDATE_BUILD_TOKEN
+        if (
+            not configured_token or not isinstance(build_token, str)
+            or not secrets.compare_digest(configured_token.encode(), build_token.encode())
+        ):
+            return {"success": False, "error": "An update channel build token is required.", "status_code": 403}
+        if (
+            platform != "windows" or version != "1.5.3"
+            or params.get("installation", "installationY") != "installationY"
+            or params.get("direction", "both") == "outgoing"
+        ):
+            return {"success": False, "error": "Select an installable RustDesk 1.5.3 Windows x64 client that accepts incoming connections.", "status_code": 400}
+        try:
+            version_order(app_version or version)
+            _, rdgen_update_base, rdgen_update_key = channel_config(update_channel)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "status_code": 400}
+        update_public_key = ""
     # If a custom update public key is provided, force the "remove new version
     # notification" behaviour off so the client keeps checking for updates via
     # the self-hosted update URL instead.
@@ -157,6 +181,8 @@ def generate_custom_client(params, full_url):
         filename = "rustdesk"
     if platform in ("windows", "windows-x86"):
         version_label = "nightly" if version == "master" else version
+        if rdgen_update_base and app_version:
+            version_label = app_version.replace("+", "-build")
         filename = f"{filename}_v{version_label}"
     if not all(char.isascii() for char in appname):
         appname = "rustdesk"
@@ -316,6 +342,10 @@ def generate_custom_client(params, full_url):
     if overrideManual:
         apply_manual_settings(overrideManual, decodedCustom['override-settings'])
     
+    if rdgen_update_base:
+        decodedCustom['override-settings']['allow-auto-update'] = 'Y'
+        decodedCustom['override-settings']['enable-check-update'] = 'N'
+
     decodedCustomJson = json.dumps(decodedCustom)
 
     string_bytes = decodedCustomJson.encode("ascii")
@@ -369,6 +399,8 @@ def generate_custom_client(params, full_url):
         "xOffline": 'true' if xOffline else 'false',
         "removeNewVersionNotif": 'true' if removeNewVersionNotif else 'false',
         "update_public_key": update_public_key,
+        "rdgen_update_base": rdgen_update_base,
+        "rdgen_update_key": rdgen_update_key,
         "compname": compname,
         "androidappid":androidappid,
         "filename":filename

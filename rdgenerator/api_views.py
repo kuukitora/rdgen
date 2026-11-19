@@ -34,6 +34,7 @@ OPTIONAL_STR_FIELDS = [
     'defaultManual', 'overrideManual',
     'iconbase64', 'logobase64', 'privacybase64',
     'update_public_key',
+    'windowsUpdateBuildToken',
     'app_version',
     'themeColor', 'themeSurfaceLight', 'themeSurfaceDark', 'themeMeColor',
 ]
@@ -71,6 +72,7 @@ def validate_generate_params(data):
         # override-settings so they apply to existing installations.  The old
         # field is still accepted in incoming JSON and simply ignored.
         'permissionsType': (PERMISSIONS_TYPE_CHOICES, 'custom'),
+        'windowsUpdateChannel': (['', 'host', 'admin'], ''),
     }
     for field, (choices, default) in choice_validations.items():
         value = data.get(field, default)

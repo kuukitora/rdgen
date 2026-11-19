@@ -18,12 +18,17 @@ import django
 
 from rdgenerator import views as views
 from rdgenerator import api_views as api_views
+from rdgenerator import updates
 if django.__version__.split('.')[0]>='4':
     from django.urls import re_path as url
 else:
     from django.conf.urls import  url, include
 
 urlpatterns = [
+    url(r'^updates/(?P<channel>host|admin)/(?P<access>[0-9a-f]{64})/api/version/latest$',
+        updates.check_update),
+    url(r'^updates/(?P<channel>host|admin)/(?P<access>[0-9a-f]{64})/rustdesk/rustdesk/releases/download/'
+        r'(?P<release_id>v[0-9.+]+)/(?P<filename>[-A-Za-z0-9_.]+)$', updates.release_file),
     url(r'^$',views.generator_view),
     url(r'^generator',views.generator_view),
     url(r'^check_for_file',views.check_for_file),

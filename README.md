@@ -37,13 +37,15 @@ Save your configuration from the rdgen web interface, or generate your own, then
 For a Windows x64 client that accepts incoming connections, leave installation
 enabled and download the MSI from the generation results. Run it as an
 administrator. The package installs the Windows service so the client can accept
-connections at the sign-in screen before a user logs in.
+connections at the sign-in screen before a user logs in. The installer does not
+open the client window or add a tray shortcut at Windows sign-in. The client
+remains available from the Start menu.
 
 For managed installation without launching the client interface, run this from
 an elevated shell. Substitute the downloaded MSI filename.
 
 ```powershell
-msiexec.exe /i ".\client_v1.5.3.msi" /qn /norestart LAUNCH_TRAY_APP=N
+msiexec.exe /i ".\client_v1.5.3.msi" /qn /norestart
 ```
 
 Confirm that the service shows as running in Windows Services, then test from a
@@ -56,3 +58,39 @@ remote username field, copy the username on the controller, then choose
 **Control Actions → Send clipboard keystrokes** in the remote session toolbar.
 Repeat for the password field and submit Windows sign-in manually. This uses
 RustDesk's keyboard input for the focused field.
+
+### Signed online updates for the Windows service
+
+Create separate Ed25519 key pairs and random 32-byte hexadecimal access tokens
+for Host and Admin. Keep the signing keys with the release operator. Set the
+following variables in the RDGen deployment.
+
+| Variable | Value |
+| --- | --- |
+| `RDGEN_UPDATE_ORIGIN` | HTTPS origin for updates, including a port if needed |
+| `RDGEN_UPDATE_ROOT` | Persistent directory for signed releases |
+| `RDGEN_UPDATE_HOST_ACCESS`, `RDGEN_UPDATE_ADMIN_ACCESS` | Different 64-character lowercase hexadecimal access tokens |
+| `RDGEN_UPDATE_HOST_PUBLIC_KEY`, `RDGEN_UPDATE_ADMIN_PUBLIC_KEY` | Different Base64-encoded raw Ed25519 public keys |
+| `RDGEN_UPDATE_BUILD_TOKEN` | Separate secret required to generate clients that use these channels |
+
+Set **Windows automatic updates** to the matching channel on an installable
+Windows x64 build with RustDesk 1.5.3. Enter the build token at submission.
+Leave **Application version** blank for the first installation. To release
+another build from the same RustDesk tag, set a higher application version such
+as `1.5.3+001`. Keep the app name identical between releases so Windows
+Installer upgrades the existing product.
+
+On the signing machine, set the same channel environment and a local
+`RDGEN_UPDATE_ROOT`. Sign the MSI from the corresponding build.
+
+```text
+python manage.py publish_windows_update host 1.5.3+001 path/to/host.msi --signing-key path/to/host-ed25519.pem
+```
+
+Transfer the complete version directory to that channel on the server before
+replacing its `latest` file with the signed release's pointer. The service
+uses HTTPS and verifies the channel's signature and the installer's SHA-256
+before installing. RustDesk defers installation while a remote session is active.
+Avoid publishing a generated package containing a shared preset password to a
+public release location. Keep channel access URLs out of access logs and restrict
+the update endpoint to the devices that need it where your network permits.
