@@ -1,0 +1,73 @@
+name: Verify candidate Windows installer
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: 'Candidate build workflow run ID'
+        required: true
+        type: string
+      app_name:
+        description: 'Installed application and service name'
+        required: true
+        type: string
+permissions:
+  actions: read
+  contents: read
+jobs:
+  install-check:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: rdgen-windows-encrypted
+          run-id: ${{ inputs.source_run }}
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Extract candidate MSI
+        shell: pwsh
+        env:
+          RDGEN_ARTIFACT_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
+        run: |
+          python -m pip install pyzipper
+          @'
+          import os, pathlib, pyzipper
+          folder = pathlib.Path('candidate')
+          archives = list(folder.glob('*.zip'))
+          if len(archives) != 1 or not os.environ.get('RDGEN_ARTIFACT_PASSWORD'):
+              raise RuntimeError('Encrypted candidate or password unavailable')
+          with pyzipper.AESZipFile(archives[0]) as archive:
+              archive.setpassword(os.environ['RDGEN_ARTIFACT_PASSWORD'].encode())
+              files = [name for name in archive.namelist() if name.lower().endswith('.msi')]
+              if len(files) != 1:
+                  raise RuntimeError('Expected one MSI in candidate')
+              (folder / 'candidate.msi').write_bytes(archive.read(files[0]))
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install, restart service, reinstall and uninstall
+        shell: pwsh
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:APP_NAME -notin @('Arcade Connect', 'Arcade Connect Admin')) { throw 'Unexpected application name' }
+          $msi = (Resolve-Path candidate/candidate.msi).Path
+          $exe = Join-Path $env:ProgramFiles "$env:APP_NAME\$env:APP_NAME.exe"
+          New-NetFirewallRule -DisplayName 'RDGen isolated installer validation' -Direction Outbound -Action Block -Program $exe | Out-Null
+          function Install-Candidate {
+            $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart', '/L*v', "`"$env:RUNNER_TEMP\rdgen-install.log`"") -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "MSI installation failed with exit code $($p.ExitCode)." }
+            $service = Get-CimInstance Win32_Service -Filter "Name='$env:APP_NAME'"
+            if (!$service -or $service.State -ne 'Running' -or $service.StartMode -ne 'Auto' -or $service.StartName -ne 'LocalSystem' -or !$service.PathName.StartsWith("`"$exe`"")) {
+              throw 'Service is absent or does not have the expected running, automatic, LocalSystem configuration.'
+            }
+          }
+          Install-Candidate
+          Restart-Service -Name $env:APP_NAME
+          if ((Get-Service -Name $env:APP_NAME).Status -ne 'Running') { throw 'Service did not restart.' }
+          Install-Candidate
+          $p = Start-Process msiexec.exe -ArgumentList @('/x', "`"$msi`"", '/qn', '/norestart') -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "MSI uninstall failed with exit code $($p.ExitCode)." }
+          if (Get-Service -Name $env:APP_NAME -ErrorAction SilentlyContinue) { throw 'Service remains after uninstall.' }
+          Install-Candidate
+          $p = Start-Process msiexec.exe -ArgumentList @('/x', "`"$msi`"", '/qn', '/norestart') -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "MSI second uninstall failed with exit code $($p.ExitCode)." }
