@@ -103,6 +103,16 @@ jobs:
             }
           # - { target: aarch64-pc-windows-msvc, os: windows-2022, arch: aarch64 }
     steps:
+      - name: Preserve local Rust build cache
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:GITHUB_WORKSPACE 'target'
+          $saved = 'D:\rdgen-build-tools\rustdesk-target'
+          if (Test-Path -LiteralPath $target) {
+            if (Test-Path -LiteralPath $saved) { throw 'Build cache already exists; refusing to overwrite it.' }
+            Move-Item -LiteralPath $target -Destination $saved -ErrorAction Stop
+          }
+
       - name: Checkout Repository
         uses: actions/checkout@v7
         
@@ -179,6 +189,16 @@ jobs:
         with:
           repository: rustdesk/rustdesk
           submodules: recursive
+
+      - name: Restore local Rust build cache
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:GITHUB_WORKSPACE 'target'
+          $saved = 'D:\rdgen-build-tools\rustdesk-target'
+          if (Test-Path -LiteralPath $saved) {
+            if (Test-Path -LiteralPath $target) { throw 'Build target already exists; refusing to overwrite it.' }
+            Move-Item -LiteralPath $saved -Destination $target -ErrorAction Stop
+          }
 
       - name: Set custom app version
         if: ${{ inputs.app_version != '' }}
