@@ -16,6 +16,29 @@ def patch(root):
     source = replace_once(source,
         'let (mut conn, kcp, mut typ, mut direct) = match direct_result {',
         'let (mut conn, mut kcp, mut typ, mut direct) = match direct_result {')
+    # The rendezvous relay-response race has its own secure-handshake path.
+    # A direct TCP/KCP winner there needs the same fallback as the later path.
+    source = replace_once(source,
+        'let (mut conn, kcp, mut typ, mut direct) = race_result?;',
+        'let (mut conn, mut kcp, mut typ, mut direct) = race_result?;')
+    source = replace_once(source,
+        'Err(e) if typ == "WebRTC" => {',
+        'Err(e) if (typ == "WebRTC" || direct) && !relay_server_rr.is_empty() => {')
+    race_start = source.index('let (mut conn, mut kcp, mut typ, mut direct) = race_result?;')
+    race_end = source.index('// `direct` came from the winning future', race_start)
+    race = replace_once(source[race_start:race_end],
+        '"WebRTC secure handshake failed ({}), falling back to relay",',
+        '"Direct secure handshake failed ({}), falling back to relay",')
+    race = replace_once(race,
+        '"WebRTC secure failed ({}); relay fallback also failed: {}",',
+        '"Direct secure failed ({}); relay fallback also failed: {}",')
+    race = replace_once(race,
+        '// WebRTC won the race but identity/DTLS binding failed. Fall back',
+        '// The direct transport failed its secure handshake. Fall back')
+    source = source[:race_start] + race + source[race_end:]
+    source = replace_once(source,
+        '                                conn = relay_conn;\n                                typ = if use_ws()',
+        '                                conn = relay_conn;\n                                kcp = None;\n                                typ = if use_ws()')
     source = replace_once(source,
         'Err(e) if typ == "WebRTC" && !relay_server.is_empty() => {',
         'Err(e) if typ != "Relay" && !relay_server.is_empty() => {')
