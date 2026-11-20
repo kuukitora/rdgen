@@ -121,6 +121,9 @@ jobs:
           $sevenZip = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
           if (-not (Test-Path $sevenZip)) { throw '7-Zip is required on the local runner.' }
           (Split-Path $sevenZip) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $localTools = 'D:\rdgen-build-tools\bin'
+          if (-not (Test-Path (Join-Path $localTools 'jq.exe'))) { throw 'jq is required on the local runner.' }
+          $localTools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Load Secrets
         uses: ./.github/actions/decrypt-secrets
