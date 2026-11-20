@@ -80,6 +80,7 @@ jobs:
     if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     name: Build Windows
     env:
+      RUNNER_TOOL_CACHE: D:\rdgen-build-tools\toolcache
       CARGO_HOME: D:\rdgen-build-tools\cargo
       RUSTUP_HOME: D:\rdgen-build-tools\rustup
       TEMP: D:\rdgen-build-tools\tmp
@@ -115,6 +116,9 @@ jobs:
           $gitBash = Join-Path $env:ProgramFiles 'Git/bin/bash.exe'
           if (-not (Test-Path $gitBash)) { throw 'Git for Windows Bash is required on the local runner.' }
           (Split-Path $gitBash) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $sevenZip = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
+          if (-not (Test-Path $sevenZip)) { throw '7-Zip is required on the local runner.' }
+          (Split-Path $sevenZip) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Load Secrets
         uses: ./.github/actions/decrypt-secrets
