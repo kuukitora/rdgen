@@ -459,7 +459,10 @@ jobs:
           flutter precache --windows
           Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
           Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
-          mv -Force windows-x64-release/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+          $flutterBin = Split-Path (Get-Command flutter.bat -ErrorAction Stop).Source
+          $engineDir = Join-Path $flutterBin 'cache/artifacts/engine/windows-x64-release'
+          if (-not (Test-Path $engineDir)) { throw 'Flutter engine directory was not found.' }
+          Move-Item -Force windows-x64-release/* $engineDir/
 
       - name: Patch flutter
         shell: bash
@@ -477,24 +480,12 @@ jobs:
           targets: ${{ matrix.job.target }}
           components: "rustfmt"
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: ${{ matrix.job.os }}
-
-      - name: Restore vcpkg installed cache
-        uses: actions/cache@v6
-        with:
-          path: D:\rdgen-build-tools\vcpkg\installed
-          key: vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.vcpkg-triplet }}
-          restore-keys: |
-            vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-
-
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: D:\rdgen-build-tools\vcpkg
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
-          doNotCache: false
+          doNotCache: true
 
       - name: Install vcpkg dependencies
         env:
@@ -522,13 +513,6 @@ jobs:
           head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
         shell: bash
 
-      - name: Save vcpkg installed cache
-        uses: actions/cache/save@v6
-        continue-on-error: true
-        with:
-          path: D:\rdgen-build-tools\vcpkg\installed
-          key: vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.vcpkg-triplet }}
-          
       - name: magick stuff
         if: ${{ env.iconlink_url != 'false' }}
         uses: nick-fields/retry@v4
