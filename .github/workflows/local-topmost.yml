@@ -42,6 +42,16 @@ jobs:
     env:
       build_output_dir: RustDeskTempTopMostWindow/WindowInjection/${{ inputs.platform }}/${{ inputs.configuration }}
     steps:
+      - name: Preserve local Rust build cache
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:GITHUB_WORKSPACE 'target'
+          $saved = 'D:\rdgen-build-tools\rustdesk-target'
+          if (Test-Path -LiteralPath $target) {
+            if (Test-Path -LiteralPath $saved) { throw 'Build cache already exists; refusing to overwrite it.' }
+            Move-Item -LiteralPath $target -Destination $saved -ErrorAction Stop
+          }
+
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v3
 
