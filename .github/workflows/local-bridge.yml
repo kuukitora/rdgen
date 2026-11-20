@@ -47,7 +47,7 @@ jobs:
 
       - name: Check locally installed prerequisites
         run: |
-          for tool in clang cmake curl gcc git g++ nasm ninja pkg-config wget; do
+          for tool in clang cmake curl gcc git g++ jq nasm ninja pkg-config python unzip wget xz zip; do
             command -v "$tool" >/dev/null || { echo "Missing local prerequisite: $tool"; exit 1; }
           done
 
