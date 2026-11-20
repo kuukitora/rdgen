@@ -15,6 +15,14 @@ def replace_once(text, old, new, description):
 
 def prepare_msi(root):
     package = root / "res/msi/Package"
+    # AnotherApp is a regular dialog, so error-dialog result ErrorAbort is
+    # invalid and produces MSI error 2866 when the user clicks Cancel.
+    conflict_dialog = package / 'UI/AnotherApp.wxs'
+    source = conflict_dialog.read_text(encoding='utf-8')
+    source = replace_once(source, '<Publish Event="EndDialog" Value="ErrorAbort" />',
+                          '<Publish Event="EndDialog" Value="Exit" />',
+                          'MSI existing-installation conflict dialog')
+    conflict_dialog.write_text(source, encoding='utf-8')
     components = package / "Components/RustDesk.wxs"
     source = components.read_text(encoding="utf-8")
     source, count = re.subn(
