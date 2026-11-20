@@ -1,5 +1,5 @@
-name: Custom Windows Client Generator
-run-name: Custom Windows Client Generator
+name: RDGen Local Windows Builder
+run-name: RDGen Local Windows Builder
 on: 
   workflow_dispatch:
     inputs:
@@ -49,39 +49,22 @@ env:
 
 
 jobs:
-  verify-update:
-    if: ${{ inputs.version == 'verify-update' }}
-    uses: ./.github/workflows/windows-update-check.yml
-    with:
-      bundle: ${{ inputs.zip_url }}
-      app_name: ${{ inputs.app_version }}
-    secrets: inherit
-
-  verify-candidate:
-    if: ${{ inputs.version == 'verify-installer' || inputs.version == 'probe-inventory' }}
-    uses: ./.github/workflows/windows-install-check.yml
-    with:
-      source_run: ${{ inputs.zip_url }}
-      app_name: ${{ inputs.app_version }}
-      live_probe: ${{ inputs.version == 'probe-inventory' }}
-    secrets: inherit
-
   setup:
     if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
-    uses: ./.github/workflows/fetch-encrypted-secrets.yml
+    uses: ./.github/workflows/local-fetch-secrets.yml
     with:
       zip_url_json: ${{ inputs.zip_url }}
 
   generate-bridge:
     if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
-    uses: ./.github/workflows/bridge.yml
+    uses: ./.github/workflows/local-bridge.yml
     with:
       version: ${{ inputs.version }}
 
   build-RustDeskTempTopMostWindow:
     if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     needs: setup
-    uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
+    uses: ./.github/workflows/local-topmost.yml
     with:
       rustdesk-version: ${{ inputs.version }}
       upload-artifact: true
@@ -96,8 +79,13 @@ jobs:
   build-for-windows-flutter:
     if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     name: Build Windows
+    env:
+      CARGO_HOME: D:\rdgen-build-tools\cargo
+      RUSTUP_HOME: D:\rdgen-build-tools\rustup
+      TEMP: D:\rdgen-build-tools\tmp
+      TMP: D:\rdgen-build-tools\tmp
     needs: [build-RustDeskTempTopMostWindow, generate-bridge, setup]
-    runs-on: ${{ matrix.job.os }}
+    runs-on: [self-hosted, rdgen-local]
     strategy:
       fail-fast: false
       matrix:
@@ -216,10 +204,10 @@ jobs:
           name: bridge-artifact
           path: ./
 
-      - name: Install ImageMagick on Windows
+      - name: Check local ImageMagick
+        shell: pwsh
         run: |
-          choco install -y imagemagick.app --no-progress
-          Get-ChildItem -Path "${env:ProgramFiles}" | % { $_.FullName } | Select-String -Pattern "[\/\\]ImageMagick[^\/\\]*$" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+          if (-not (Get-Command magick -ErrorAction SilentlyContinue)) { throw 'Install ImageMagick on the local runner before building.' }
 
       - name: fix flutter_gpu_texture_renderer (fixed in master rustdesk)
         shell: bash
@@ -489,7 +477,7 @@ jobs:
       - name: Restore vcpkg installed cache
         uses: actions/cache@v6
         with:
-          path: C:\vcpkg\installed
+          path: D:\rdgen-build-tools\vcpkg\installed
           key: vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.vcpkg-triplet }}
           restore-keys: |
             vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-
@@ -497,7 +485,7 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgDirectory: C:\vcpkg
+          vcpkgDirectory: D:\rdgen-build-tools\vcpkg
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: false
 
@@ -531,7 +519,7 @@ jobs:
         uses: actions/cache/save@v6
         continue-on-error: true
         with:
-          path: C:\vcpkg\installed
+          path: D:\rdgen-build-tools\vcpkg\installed
           key: vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.vcpkg-triplet }}
           
       - name: magick stuff
@@ -942,7 +930,7 @@ jobs:
 
   cleanup:
     needs: [build-for-windows-flutter]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, rdgen-local-linux]
     continue-on-error: true
     if: ${{ always() && inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     steps:
