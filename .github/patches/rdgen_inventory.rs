@@ -12,7 +12,26 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 const CHALLENGE_PREFIX: &str = "betterdesk-embedded-agent-v1\n";
 
 #[link(name = "kernel32")]
-extern "system" { fn GetLogicalDrives() -> u32; }
+extern "system" {
+    fn GetLogicalDrives() -> u32;
+    fn GetDriveTypeW(root: *const u16) -> u32;
+}
+
+// Mapped network drives have drive-letter paths even after canonicalization.
+fn local_drive_root(path: &str) -> Option<String> {
+    let tail = path.strip_prefix(r"\\?\")?;
+    let bytes = tail.as_bytes();
+    if bytes.len() < 3 || !bytes[0].is_ascii_alphabetic() || bytes[1] != b':' || bytes[2] != b'\\' {
+        return None;
+    }
+    Some(tail[..3].to_string())
+}
+
+fn is_local_drive(root: &str) -> bool {
+    let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+    // DRIVE_REMOTE = 4. UNKNOWN and NO_ROOT_DIR are rejected too.
+    matches!(unsafe { GetDriveTypeW(wide.as_ptr()) }, 2 | 3 | 5 | 6)
+}
 
 // Only fixed local commands are allowed; requests cannot supply shell code.
 const SERVICES: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new(); @(Get-Service | Select-Object -First 500 @{n='name';e={$_.Name}},@{n='display_name';e={$_.DisplayName}},@{n='status';e={$_.Status.ToString().ToLowerInvariant()}},@{n='start_type';e={$_.StartType.ToString()}}) | ConvertTo-Json -Compress -Depth 4"#;
@@ -51,7 +70,9 @@ fn browse_files(payload: &Value) -> Result<Value, String> {
     if input.is_empty() || input == "/" {
         let mask = unsafe { GetLogicalDrives() };
         if mask == 0 { return Err("drives_unavailable".into()); }
-        let entries: Vec<Value> = (0..26).filter(|i| mask & (1 << i) != 0).map(|i| {
+        let entries: Vec<Value> = (0..26).filter(|i| mask & (1 << i) != 0).filter(|i| {
+            is_local_drive(&format!("{}:\\", (b'A' + *i as u8) as char))
+        }).map(|i| {
             let name = format!("{}:", (b'A' + i as u8) as char);
             json!({"name": name, "path": format!("{}\\", name), "is_dir": true, "size": 0})
         }).collect();
@@ -62,7 +83,8 @@ fn browse_files(payload: &Value) -> Result<Value, String> {
         return Err("invalid_local_path".into());
     }
     let resolved = path.canonicalize().map_err(|_| "path_unavailable")?;
-    if resolved.to_string_lossy().to_ascii_lowercase().starts_with(r"\\?\unc\") {
+    let resolved_string = resolved.to_string_lossy();
+    if !local_drive_root(&resolved_string).map(|root| is_local_drive(&root)).unwrap_or(false) {
         return Err("network_path_not_allowed".into());
     }
     let show_hidden = payload.get("show_hidden").and_then(Value::as_bool).unwrap_or(false);
