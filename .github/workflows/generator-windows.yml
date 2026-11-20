@@ -209,7 +209,7 @@ jobs:
         shell: bash
         run: |
           curl -sSL -o allow_custom_update.py https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/allow_custom_update.py
-          python3 allow_custom_update.py \
+          python allow_custom_update.py \
             --rustdesk-root . \
             --update-url "${{ env.downloadLink}}/api/version/latest" \
             --ed25519-public-key "${{ env.update_public_key }}"
@@ -641,7 +641,8 @@ jobs:
       - name: Build rustdesk
         run: |
           # Windows: build RustDesk
-          python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec ${{ matrix.job.build-args }}
+          python .\build.py --portable --flutter --skip-portable-pack --hwcodec ${{ matrix.job.build-args }}
+          if ($LASTEXITCODE -ne 0) { throw "RustDesk build failed with exit code $LASTEXITCODE" }
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
  
           # Download usbmmidd_v2.zip and extract it to ./rustdesk
@@ -765,7 +766,8 @@ jobs:
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/${{ env.appname }}.exe"
+          python ./generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/${{ env.appname }}.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Portable packaging failed with exit code $LASTEXITCODE" }
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe "./SignOutput/rustdesk.exe"
