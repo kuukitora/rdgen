@@ -106,9 +106,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
         
-      - uses: actions/download-artifact@v8
-        with:
-          name: encrypted-secrets-zip
+      - name: Load local encrypted configuration
+        shell: pwsh
+        run: |
+          $shared = Join-Path 'D:\rdgen-build-tools\exchange' $env:GITHUB_RUN_ID
+          Copy-Item -LiteralPath (Join-Path $shared 'secrets.zip') -Destination 'secrets.zip' -ErrorAction Stop
 
       - name: Select Git Bash on local Windows
         shell: pwsh
@@ -209,20 +211,15 @@ jobs:
             --update-url "${{ env.downloadLink}}/api/version/latest" \
             --ed25519-public-key "${{ env.update_public_key }}"
 
-      - name: Restore bridge files
-        id: bridge_download
-        uses: actions/download-artifact@v8
-        continue-on-error: true
-        with:
-          name: bridge-artifact
-          path: ./
-
-      - name: Retry bridge download after network interruption
-        if: steps.bridge_download.outcome == 'failure'
-        uses: actions/download-artifact@v8
-        with:
-          name: bridge-artifact
-          path: ./
+      - name: Restore local bridge files
+        shell: pwsh
+        run: |
+          $shared = Join-Path (Join-Path 'D:\rdgen-build-tools\exchange' $env:GITHUB_RUN_ID) 'bridge'
+          $files = @('src/bridge_generated.rs','src/bridge_generated.io.rs','flutter/lib/generated_bridge.dart','flutter/lib/generated_bridge.freezed.dart','flutter/macos/Runner/bridge_generated.h','flutter/ios/Runner/bridge_generated.h')
+          foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath (Join-Path $shared $file))) { throw "Missing local bridge file: $file" }
+            Copy-Item -LiteralPath (Join-Path $shared $file) -Destination $file -Force -ErrorAction Stop
+          }
 
       - name: Check local ImageMagick
         shell: pwsh
@@ -717,13 +714,13 @@ jobs:
             ls -l ./libs/portable/Runner.res;
           fi
 
-      - name: Download RustDeskTempTopMostWindow artifacts
-        uses: actions/download-artifact@master
+      - name: Restore local privacy DLL
         if: env.UPLOAD_ARTIFACT == 'true'
-        with:
-          name: topmostwindow-artifacts
-          path: "./rustdesk"
-      
+        shell: pwsh
+        run: |
+          $shared = Join-Path 'D:\rdgen-build-tools\exchange' $env:GITHUB_RUN_ID
+          Copy-Item -LiteralPath (Join-Path $shared 'WindowInjection.dll') -Destination './rustdesk/WindowInjection.dll' -Force -ErrorAction Stop
+
       - name: zip dlls
         continue-on-error: true
         shell: pwsh
@@ -945,17 +942,10 @@ jobs:
     continue-on-error: true
     if: ${{ always() && inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     steps:
-      - name: Delete secrets artifact
-        uses: geekyeggo/delete-artifact@v6
-        with:
-          name: encrypted-secrets-zip
-
-      - name: Delete bridge artifact
-        uses: geekyeggo/delete-artifact@v6
-        with:
-          name: bridge-artifact
-
-      - name: Delete topmost window artifact
-        uses: geekyeggo/delete-artifact@v6
-        with:
-          name: topmostwindow-artifacts
+      - name: Remove this run's temporary exchange files
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
+          shared="/mnt/d/rdgen-build-tools/exchange/$GITHUB_RUN_ID"
+          rm -rf -- "$shared"

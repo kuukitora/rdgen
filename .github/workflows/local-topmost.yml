@@ -48,9 +48,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v8
-        with:
-          name: encrypted-secrets-zip
+      - name: Load local encrypted configuration
+        shell: pwsh
+        run: |
+          $shared = Join-Path 'D:\rdgen-build-tools\exchange' $env:GITHUB_RUN_ID
+          Copy-Item -LiteralPath (Join-Path $shared 'secrets.zip') -Destination 'secrets.zip' -ErrorAction Stop
 
       - name: Select Git Bash on local Windows
         shell: pwsh
@@ -98,10 +100,9 @@ jobs:
             }
             msbuild ${{ env.project_path }} -p:Configuration=${{ inputs.configuration }} -p:Platform=${{ inputs.platform }} /p:TargetVersion=${{ inputs.target_version }} /p:PlatformToolset=v143
 
-      - name: Archive build artifacts
-        uses: actions/upload-artifact@v7
+      - name: Share privacy DLL locally
         if: ${{ inputs.upload-artifact }}
-        with:
-            name: topmostwindow-artifacts
-            path: |
-              ./${{ env.build_output_dir }}/WindowInjection.dll
+        shell: pwsh
+        run: |
+          $shared = Join-Path 'D:\rdgen-build-tools\exchange' $env:GITHUB_RUN_ID
+          Copy-Item -LiteralPath (Join-Path $env:build_output_dir 'WindowInjection.dll') -Destination (Join-Path $shared 'WindowInjection.dll') -ErrorAction Stop

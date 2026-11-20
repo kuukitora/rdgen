@@ -88,14 +88,12 @@ jobs:
             ~/.cargo/bin/flutter_rust_bridge_codegen --rust-input ./src/flutter_ffi.rs --dart-output ./flutter/lib/generated_bridge.dart --c-output ./flutter/macos/Runner/bridge_generated.h
             cp ./flutter/macos/Runner/bridge_generated.h ./flutter/ios/Runner/bridge_generated.h
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: bridge-artifact
-          path: |
-            ./src/bridge_generated.rs
-            ./src/bridge_generated.io.rs
-            ./flutter/lib/generated_bridge.dart
-            ./flutter/lib/generated_bridge.freezed.dart
-            ./flutter/macos/Runner/bridge_generated.h
-            ./flutter/ios/Runner/bridge_generated.h
+      - name: Share bridge files locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          shared="/mnt/d/rdgen-build-tools/exchange/${GITHUB_RUN_ID}/bridge"
+          for f in src/bridge_generated.rs src/bridge_generated.io.rs flutter/lib/generated_bridge.dart flutter/lib/generated_bridge.freezed.dart flutter/macos/Runner/bridge_generated.h flutter/ios/Runner/bridge_generated.h; do
+            mkdir -p "$shared/$(dirname "$f")"
+            cp "$f" "$shared/$f"
+          done
