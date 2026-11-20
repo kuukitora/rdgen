@@ -206,7 +206,16 @@ jobs:
             --ed25519-public-key "${{ env.update_public_key }}"
 
       - name: Restore bridge files
-        uses: actions/download-artifact@master
+        id: bridge_download
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Retry bridge download after network interruption
+        if: steps.bridge_download.outcome == 'failure'
+        uses: actions/download-artifact@v8
         with:
           name: bridge-artifact
           path: ./
