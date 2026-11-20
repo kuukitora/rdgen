@@ -454,10 +454,17 @@ jobs:
                   else:
                       print("Warning: RD_PRINTER_PORT not matched in RemotePrinter.cpp")
 
-      - name: Install LLVM and Clang
-        uses: KyleMayes/install-llvm-action@v2
-        with:
-          version: ${{ env.LLVM_VERSION }}
+      - name: Use installed LLVM and Clang
+        shell: pwsh
+        run: |
+          $llvmRoot = Join-Path $env:ProgramFiles 'LLVM'
+          $llvmBin = Join-Path $llvmRoot 'bin'
+          if (-not (Test-Path (Join-Path $llvmBin 'libclang.dll'))) { throw 'Local LLVM with libclang.dll is required.' }
+          "LLVM_PATH=$llvmRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "LIBCLANG_PATH=$llvmBin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $llvmBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $llvmBin 'clang.exe') --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install flutter
         uses: subosito/flutter-action@v2.12.0 #https://github.com/subosito/flutter-action/issues/277
