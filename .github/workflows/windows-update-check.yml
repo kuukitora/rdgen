@@ -124,18 +124,6 @@ jobs:
                   Write-Host $safe
                 }
             }
-            # Diagnose whether the same candidate succeeds without relying on handoff.
-            $manualLog = Join-Path $env:RUNNER_TEMP 'rdgen-manual-upgrade.log'
-            $manual = Start-Process msiexec.exe -ArgumentList @('/i', "`"$new`"", '/qn', 'INSTALLPRINTER=0', 'LAUNCH_TRAY_APP=N', '/norestart', '/L*v', "`"$manualLog`"") -Wait -PassThru
-            $manualMatches = (Get-FileHash -Algorithm SHA256 -LiteralPath $library -ErrorAction SilentlyContinue).Hash -eq $expectedHash
-            Write-Host "Direct MSI upgrade exit code: $($manual.ExitCode); installed candidate: $manualMatches"
-            if (Test-Path -LiteralPath $manualLog) {
-              Select-String -LiteralPath $manualLog -Pattern 'MainEngineThread is returning|Return value 3|Error (1\d{3}|2\d{3})\.|FindRelatedProducts: Found application|Service did not reach RUNNING' |
-                Select-Object -Last 20 | ForEach-Object {
-                  $safe = $_.Line -replace 'https?://\S+', '[url]' -replace '[A-Za-z0-9+/=_-]{40,}', '[redacted]'
-                  Write-Host $safe
-                }
-            }
             throw 'Candidate was not installed automatically with a running service'
           }
           Write-Host 'Signed candidate installed automatically and service is running.'
