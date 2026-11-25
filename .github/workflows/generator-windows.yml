@@ -18,6 +18,11 @@ on:
         required: false
         default: ''
         type: string
+      artifact_only:
+        description: 'Keep the encrypted build artifact without uploading downloads to RDGen'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: rdgen-windows-hosted
@@ -919,16 +924,16 @@ jobs:
           compression-level: 0
 
       - name: Send Windows downloads to RDGen
-        if: env.rdgen == 'true'
+        if: env.rdgen == 'true' && !inputs.artifact_only
         uses: nick-fields/retry@v4
         with:
-          timeout_minutes: 22
-          max_attempts: 3
+          timeout_minutes: 8
+          max_attempts: 2
           retry_wait_seconds: 15
           shell: bash
           command: |
             upload() {
-              curl --fail-with-body --connect-timeout 30 --max-time 600 \
+              curl --fail-with-body --connect-timeout 30 --max-time 210 \
                 -H "Expect:" -H "Authorization: Bearer $token" -F "file=@$1" -F "uuid=$uuid" \
                 "${{ secrets.GENURL }}/save_custom_client"
             }
