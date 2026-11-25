@@ -64,27 +64,34 @@ jobs:
           New-Item -ItemType Directory -Force $extract | Out-Null
           $p = Start-Process msiexec.exe -ArgumentList @('/a', "`"$new`"", '/qn', "TARGETDIR=`"$extract`"") -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Candidate extraction failed: $($p.ExitCode)" }
-          $expected = @(Get-ChildItem -Path $extract -Filter "$env:APP_NAME.exe" -File -Recurse)
-          if ($expected.Count -ne 1) { throw 'Expected executable not found in candidate MSI' }
+          # The update version lives in the RustDesk DLL. The Flutter launcher
+          # can have identical contents across two RDGen releases.
+          $expected = @(Get-ChildItem -Path $extract -Filter 'librustdesk.dll' -File -Recurse)
+          if ($expected.Count -ne 1) { throw 'Expected RustDesk library not found in candidate MSI' }
           $expectedHash = (Get-FileHash -Algorithm SHA256 $expected[0].FullName).Hash
-          $exe = Join-Path $env:ProgramFiles "$env:APP_NAME\$env:APP_NAME.exe"
+          $appDir = Join-Path $env:ProgramFiles $env:APP_NAME
+          $exe = Join-Path $appDir "$env:APP_NAME.exe"
+          $library = Join-Path $appDir 'librustdesk.dll'
           New-NetFirewallRule -DisplayName 'RDGen update test blocks Internet' -Direction Outbound -Action Block -Program $exe -RemoteAddress Internet | Out-Null
           $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$old`"", '/qn', '/norestart') -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Old MSI install failed: $($p.ExitCode)" }
-          if (!(Test-Path $exe)) { throw 'Old executable was not installed' }
-          if ((Get-FileHash -Algorithm SHA256 $exe).Hash -eq $expectedHash) { throw 'Old and new executables are identical' }
+          if (!(Test-Path -LiteralPath $exe) -or !(Test-Path -LiteralPath $library)) { throw 'Old client was not installed' }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath $library).Hash -eq $expectedHash) { throw 'Old and new RustDesk libraries are identical' }
           $updated = $false
           for ($attempt = 0; $attempt -lt 100; $attempt++) {
-            if ((Test-Path $exe) -and (Get-FileHash -Algorithm SHA256 $exe).Hash -eq $expectedHash) {
+            if ((Get-FileHash -Algorithm SHA256 -LiteralPath $library -ErrorAction SilentlyContinue).Hash -eq $expectedHash) {
               $service = Get-CimInstance Win32_Service -Filter "Name='$env:APP_NAME'"
-              if ($service -and $service.State -eq 'Running' -and $service.StartMode -eq 'Auto') { $updated = $true; break }
+              if ($service -and $service.State -eq 'Running' -and $service.StartMode -eq 'Auto' -and $service.StartName -eq 'LocalSystem') {
+                $updated = $true
+                break
+              }
             }
             Start-Sleep -Seconds 3
           }
           if (Test-Path candidate/requests.log) { Get-Content candidate/requests.log | Sort-Object -Unique }
           if (!$updated) {
-            $matchesCandidate = (Test-Path $exe) -and (Get-FileHash -Algorithm SHA256 $exe).Hash -eq $expectedHash
-            Write-Host "Installed executable matches candidate: $matchesCandidate"
+            $matchesCandidate = (Get-FileHash -Algorithm SHA256 -LiteralPath $library -ErrorAction SilentlyContinue).Hash -eq $expectedHash
+            Write-Host "Installed RustDesk library matches candidate: $matchesCandidate"
             $service = Get-CimInstance Win32_Service -Filter "Name='$env:APP_NAME'"
             if ($service) { Write-Host "Service state: $($service.State); start mode: $($service.StartMode); exit code: $($service.ExitCode)" }
             else { Write-Host 'Service is absent.' }
