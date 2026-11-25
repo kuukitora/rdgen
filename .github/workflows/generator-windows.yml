@@ -1,5 +1,5 @@
-name: RDGen Local Windows Builder
-run-name: RDGen Local Windows Builder
+name: Custom Windows Client Generator
+run-name: Custom Windows Client Generator
 on: 
   workflow_dispatch:
     inputs:
@@ -18,6 +18,10 @@ on:
         required: false
         default: ''
         type: string
+
+concurrency:
+  group: rdgen-windows-hosted
+  cancel-in-progress: false
 
 permissions:
   actions: read
@@ -49,22 +53,39 @@ env:
 
 
 jobs:
+  verify-update:
+    if: ${{ inputs.version == 'verify-update' }}
+    uses: ./.github/workflows/windows-update-check.yml
+    with:
+      bundle: ${{ inputs.zip_url }}
+      app_name: ${{ inputs.app_version }}
+    secrets: inherit
+
+  verify-candidate:
+    if: ${{ inputs.version == 'verify-installer' || inputs.version == 'probe-inventory' }}
+    uses: ./.github/workflows/windows-install-check.yml
+    with:
+      source_run: ${{ inputs.zip_url }}
+      app_name: ${{ inputs.app_version }}
+      live_probe: ${{ inputs.version == 'probe-inventory' }}
+    secrets: inherit
+
   setup:
     if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
-    uses: ./.github/workflows/local-fetch-secrets.yml
+    uses: ./.github/workflows/fetch-encrypted-secrets.yml
     with:
       zip_url_json: ${{ inputs.zip_url }}
 
   generate-bridge:
     if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
-    uses: ./.github/workflows/local-bridge.yml
+    uses: ./.github/workflows/bridge.yml
     with:
       version: ${{ inputs.version }}
 
   build-RustDeskTempTopMostWindow:
     if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     needs: setup
-    uses: ./.github/workflows/local-topmost.yml
+    uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
     with:
       rustdesk-version: ${{ inputs.version }}
       upload-artifact: true
@@ -79,14 +100,9 @@ jobs:
   build-for-windows-flutter:
     if: ${{ inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     name: Build Windows
-    env:
-      RUNNER_TOOL_CACHE: D:\rdgen-build-tools\toolcache
-      CARGO_HOME: D:\rdgen-build-tools\cargo
-      RUSTUP_HOME: D:\rdgen-build-tools\rustup
-      TEMP: D:\rdgen-build-tools\tmp
-      TMP: D:\rdgen-build-tools\tmp
+    timeout-minutes: 90
     needs: [build-RustDeskTempTopMostWindow, generate-bridge, setup]
-    runs-on: [self-hosted, rdgen-local]
+    runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -103,37 +119,12 @@ jobs:
             }
           # - { target: aarch64-pc-windows-msvc, os: windows-2022, arch: aarch64 }
     steps:
-      - name: Preserve local Rust build cache
-        shell: pwsh
-        run: |
-          $target = Join-Path $env:GITHUB_WORKSPACE 'target'
-          $saved = 'D:\rdgen-build-tools\rustdesk-target'
-          if (Test-Path -LiteralPath $target) {
-            if (Test-Path -LiteralPath $saved) { throw 'Build cache already exists; refusing to overwrite it.' }
-            Move-Item -LiteralPath $target -Destination $saved -ErrorAction Stop
-          }
-
       - name: Checkout Repository
         uses: actions/checkout@v7
-        
-      - name: Load local encrypted configuration
-        shell: pwsh
-        run: |
-          $shared = Join-Path 'D:\rdgen-build-tools\exchange' $env:GITHUB_RUN_ID
-          Copy-Item -LiteralPath (Join-Path $shared 'secrets.zip') -Destination 'secrets.zip' -ErrorAction Stop
 
-      - name: Select Git Bash on local Windows
-        shell: pwsh
-        run: |
-          $gitBash = Join-Path $env:ProgramFiles 'Git/bin/bash.exe'
-          if (-not (Test-Path $gitBash)) { throw 'Git for Windows Bash is required on the local runner.' }
-          (Split-Path $gitBash) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          $sevenZip = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
-          if (-not (Test-Path $sevenZip)) { throw '7-Zip is required on the local runner.' }
-          (Split-Path $sevenZip) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          $localTools = 'D:\rdgen-build-tools\bin'
-          if (-not (Test-Path (Join-Path $localTools 'jq.exe'))) { throw 'jq is required on the local runner.' }
-          $localTools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - uses: actions/download-artifact@v8
+        with:
+          name: encrypted-secrets-zip
 
       - name: Load Secrets
         uses: ./.github/actions/decrypt-secrets
@@ -156,7 +147,7 @@ jobs:
           script: |
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-      
+
       - name: Set rdgen value
         if: ${{ env.rdgen == 'true' }}
         run: |
@@ -189,16 +180,6 @@ jobs:
         with:
           repository: rustdesk/rustdesk
           submodules: recursive
-
-      - name: Restore local Rust build cache
-        shell: pwsh
-        run: |
-          $target = Join-Path $env:GITHUB_WORKSPACE 'target'
-          $saved = 'D:\rdgen-build-tools\rustdesk-target'
-          if (Test-Path -LiteralPath $saved) {
-            if (Test-Path -LiteralPath $target) { throw 'Build target already exists; refusing to overwrite it.' }
-            Move-Item -LiteralPath $saved -Destination $target -ErrorAction Stop
-          }
 
       - name: Set custom app version
         if: ${{ inputs.app_version != '' }}
@@ -234,27 +215,18 @@ jobs:
             --update-url "${{ env.downloadLink}}/api/version/latest" \
             --ed25519-public-key "${{ env.update_public_key }}"
 
-      - name: Restore local bridge files
-        shell: pwsh
-        run: |
-          $shared = Join-Path (Join-Path 'D:\rdgen-build-tools\exchange' $env:GITHUB_RUN_ID) 'bridge'
-          $files = @('src/bridge_generated.rs','src/bridge_generated.io.rs','flutter/lib/generated_bridge.dart','flutter/lib/generated_bridge.freezed.dart','flutter/macos/Runner/bridge_generated.h','flutter/ios/Runner/bridge_generated.h')
-          foreach ($file in $files) {
-            if (-not (Test-Path -LiteralPath (Join-Path $shared $file))) { throw "Missing local bridge file: $file" }
-            Copy-Item -LiteralPath (Join-Path $shared $file) -Destination $file -Force -ErrorAction Stop
-          }
-
-      - name: Check local ImageMagick
-        shell: pwsh
-        run: |
-          if (-not (Get-Command magick -ErrorAction SilentlyContinue)) { throw 'Install ImageMagick on the local runner before building.' }
+      - name: Restore bridge files
+        uses: actions/download-artifact@v8
+        with:
+          name: bridge-artifact
+          path: ./
 
       - name: fix flutter_gpu_texture_renderer (fixed in master rustdesk)
         shell: bash
         run: |
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.lock
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.yaml
-      
+
       - name: change appname to custom
         if: env.appname != 'rustdesk'
         continue-on-error: true
@@ -303,7 +275,7 @@ jobs:
           sed -i -e 's|{subkey}|\\\"{subkey}\\\"|' ./src/platform/windows.rs
           sed -i -e 's|reg delete HKEY_CLASSES_ROOT\\\\.{ext} /f|reg delete \\\"HKEY_CLASSES_ROOT\\\\.{ext}\\\" /f|' ./src/platform/windows.rs
           sed -i -e 's|reg delete HKEY_CLASSES_ROOT\\\\{ext} /f|reg delete \\\"HKEY_CLASSES_ROOT\\\\{ext}\\\" /f|' ./src/platform/windows.rs
-          
+
 
       - name: change company name
         if: env.compname != 'Purslane Ltd'
@@ -326,7 +298,7 @@ jobs:
           sed -i -e 's|Purslane Ltd|${{ env.compname }}|' ./libs/portable/Cargo.toml
           sed -i -e 's|Purslane Ltd|${{ env.compname }}|' ./res/msi/Package/License.rtf
           sed -i -e 's|Purslane Ltd|${{ env.compname }}|' ./src/main.rs
-             
+
       - name: change url to custom
         if: env.urlLink != 'https://rustdesk.com'
         continue-on-error: true
@@ -474,17 +446,10 @@ jobs:
                   else:
                       print("Warning: RD_PRINTER_PORT not matched in RemotePrinter.cpp")
 
-      - name: Use installed LLVM and Clang
-        shell: pwsh
-        run: |
-          $llvmRoot = Join-Path $env:ProgramFiles 'LLVM'
-          $llvmBin = Join-Path $llvmRoot 'bin'
-          if (-not (Test-Path (Join-Path $llvmBin 'libclang.dll'))) { throw 'Local LLVM with libclang.dll is required.' }
-          "LLVM_PATH=$llvmRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "LIBCLANG_PATH=$llvmBin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          $llvmBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          & (Join-Path $llvmBin 'clang.exe') --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: ${{ env.LLVM_VERSION }}
 
       - name: Install flutter
         uses: subosito/flutter-action@v2.12.0 #https://github.com/subosito/flutter-action/issues/277
@@ -495,26 +460,25 @@ jobs:
       # https://github.com/flutter/flutter/issues/155685
       - name: Replace engine with rustdesk custom flutter engine
         run: |
-          flutter doctor -v
+          $PSNativeCommandUseErrorActionPreference = $true
           flutter precache --windows
           Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
           Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
           $flutterBin = Split-Path (Get-Command flutter.bat -ErrorAction Stop).Source
           $engineDir = Join-Path $flutterBin 'cache/artifacts/engine/windows-x64-release'
           if (-not (Test-Path $engineDir)) { throw 'Flutter engine directory was not found.' }
-          Move-Item -Force windows-x64-release/* $engineDir/
+          Copy-Item -Recurse -Force windows-x64-release/* $engineDir
 
       - name: Patch flutter
         shell: bash
         run: |
-          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
-          cd $(dirname $(dirname $(which flutter)))
+          flutter_root="$(dirname "$(dirname "$(command -v flutter)")")"
+          patch="$PWD/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
+          cd "$flutter_root"
           if [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]]; then
-            if git apply --check flutter_3.24.4_dropdown_menu_enableFilter.diff; then
-              git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
-            elif git apply --reverse --check flutter_3.24.4_dropdown_menu_enableFilter.diff; then
-              echo "Flutter patch is already applied."
-            else
+            if git apply --check "$patch"; then
+              git apply "$patch"
+            elif ! git apply --reverse --check "$patch"; then
               echo "Flutter patch does not match the installed SDK." >&2
               exit 1
             fi
@@ -527,10 +491,18 @@ jobs:
           targets: ${{ matrix.job.target }}
           components: "rustfmt"
 
+      - name: Restore vcpkg installed cache
+        uses: actions/cache@v6
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.vcpkg-triplet }}
+          restore-keys: |
+            vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-
+
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgDirectory: D:\rdgen-build-tools\vcpkg
+          vcpkgDirectory: C:\vcpkg
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: true
 
@@ -546,11 +518,8 @@ jobs:
             fi
             if [ "$attempt" -eq 3 ]; then
               find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
-                echo "$_1:"
-                echo "======"
-                cat "$_1"
-                echo "======"
-                echo ""
+                printf '\n%s\n' "$_1"
+                tail -n 40 "$_1"
               done
               exit 1
             fi
@@ -559,6 +528,13 @@ jobs:
           done
           head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
         shell: bash
+
+      - name: Save vcpkg installed cache
+        uses: actions/cache/save@v6
+        continue-on-error: true
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.vcpkg-triplet }}
 
       - name: magick stuff
         if: ${{ env.iconlink_url != 'false' }}
@@ -665,13 +641,25 @@ jobs:
             Write-Host "Error: printer-adapter folder not found in repository."
           }
 
+      - name: Resolve Windows Flutter dependencies
+        uses: nick-fields/retry@v4
+        with:
+          shell: pwsh
+          max_attempts: 2
+          timeout_minutes: 5
+          retry_wait_seconds: 15
+          command: |
+            Set-Location flutter
+            flutter pub get
+            exit $LASTEXITCODE
+
       - name: Build rustdesk
         run: |
           # Windows: build RustDesk
           python .\build.py --portable --flutter --skip-portable-pack --hwcodec ${{ matrix.job.build-args }}
           if ($LASTEXITCODE -ne 0) { throw "RustDesk build failed with exit code $LASTEXITCODE" }
-          mv ./flutter/build/windows/x64/runner/Release ./rustdesk
- 
+          Move-Item ./flutter/build/windows/x64/runner/Release ./rustdesk -ErrorAction Stop
+
           # Download usbmmidd_v2.zip and extract it to ./rustdesk
           Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
           Expand-Archive usbmmidd_v2.zip -DestinationPath . -Force
@@ -745,12 +733,12 @@ jobs:
             ls -l ./libs/portable/Runner.res;
           fi
 
-      - name: Restore local privacy DLL
+      - name: Download RustDeskTempTopMostWindow artifacts
+        uses: actions/download-artifact@v8
         if: env.UPLOAD_ARTIFACT == 'true'
-        shell: pwsh
-        run: |
-          $shared = Join-Path 'D:\rdgen-build-tools\exchange' $env:GITHUB_RUN_ID
-          Copy-Item -LiteralPath (Join-Path $shared 'WindowInjection.dll') -Destination './rustdesk/WindowInjection.dll' -Force -ErrorAction Stop
+        with:
+          name: topmostwindow-artifacts
+          path: "./rustdesk"
 
       - name: zip dlls
         continue-on-error: true
@@ -792,9 +780,8 @@ jobs:
           mv "./rustdesk/rustdesk.exe" "./rustdesk/${{ env.appname }}.exe" || echo "rustdesk.exe"
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
-          pip3 install -r requirements.txt
+          python -m pip install -r requirements.txt
           python ./generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/${{ env.appname }}.exe"
-          if ($LASTEXITCODE -ne 0) { throw "Portable packaging failed with exit code $LASTEXITCODE" }
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe "./SignOutput/rustdesk.exe"
@@ -970,14 +957,21 @@ jobs:
 
   cleanup:
     needs: [build-for-windows-flutter]
-    runs-on: [self-hosted, rdgen-local-linux]
+    runs-on: ubuntu-latest
     continue-on-error: true
     if: ${{ always() && inputs.version != 'verify-installer' && inputs.version != 'probe-inventory' && inputs.version != 'verify-update' }}
     steps:
-      - name: Remove this run's temporary exchange files
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
-          shared="/mnt/d/rdgen-build-tools/exchange/$GITHUB_RUN_ID"
-          rm -rf -- "$shared"
+      - name: Delete secrets artifact
+        uses: geekyeggo/delete-artifact@v6
+        with:
+          name: encrypted-secrets-zip
+
+      - name: Delete bridge artifact
+        uses: geekyeggo/delete-artifact@v6
+        with:
+          name: bridge-artifact
+
+      - name: Delete topmost window artifact
+        uses: geekyeggo/delete-artifact@v6
+        with:
+          name: topmostwindow-artifacts

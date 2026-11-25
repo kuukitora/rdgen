@@ -71,6 +71,22 @@ jobs:
           if ($env:LIVE_PROBE -ne 'true') {
             New-NetFirewallRule -DisplayName 'RDGen isolated installer validation' -Direction Outbound -Action Block -Program $exe | Out-Null
           }
+          # Reproduce the WindowsInstaller=0 registration left by the old EXE installer.
+          $legacyKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$env:APP_NAME"
+          if (Test-Path -LiteralPath $legacyKey) { throw 'Unexpected legacy install on the test runner.' }
+          $legacyLog = Join-Path $env:RUNNER_TEMP 'rdgen-legacy-conflict.log'
+          New-Item -Path $legacyKey -ErrorAction Stop | Out-Null
+          try {
+            New-ItemProperty -LiteralPath $legacyKey -Name WindowsInstaller -Value 0 -PropertyType DWord -ErrorAction Stop | Out-Null
+            $blocked = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart', '/L*v', "`"$legacyLog`"") -Wait -PassThru
+            if ($blocked.ExitCode -ne 1603 -or !(Select-String -LiteralPath $legacyLog -Pattern 'BlockSelfInstalledApp.*Return value 3' -Quiet)) {
+              throw "Expected the MSI to reject the legacy EXE registration with its conflict check. Exit code: $($blocked.ExitCode)."
+            }
+            if (Get-Service -Name $env:APP_NAME -ErrorAction SilentlyContinue) { throw 'Legacy conflict unexpectedly created a service.' }
+          } finally {
+            Remove-Item -LiteralPath $legacyKey -ErrorAction Stop
+          }
+
           function Install-Candidate {
             $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart', '/L*v', "`"$env:RUNNER_TEMP\rdgen-install.log`"") -Wait -PassThru
             if ($p.ExitCode -ne 0) { throw "MSI installation failed with exit code $($p.ExitCode)." }
