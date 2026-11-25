@@ -36,6 +36,15 @@ def prepare_msi(root):
     if source.count(service_condition) != 2:
         raise ValueError("RustDesk's MSI service creation conditions have changed.")
     source = source.replace(service_condition, '')
+    # Removing the previous product during a major upgrade also sets REMOVE=ALL.
+    # Its strict service-start action must not restart the product being removed.
+    uninstall_condition = '(NOT (Installed AND REMOVE AND NOT UPGRADINGPRODUCTCODE))'
+    for action in ('CreateStartService', 'CreateStartService.SetParam'):
+        match = re.search(rf'<Custom Action="{re.escape(action)}"[^\n]+', source)
+        if not match or uninstall_condition not in match[0]:
+            raise ValueError("RustDesk's MSI service removal condition has changed.")
+        source = replace_once(source, match[0], match[0].replace(
+            uninstall_condition, '(REMOVE&lt;&gt;&quot;ALL&quot;)'), f'MSI {action} sequence')
     components.write_text(source, encoding="utf-8")
 
     shortcuts = package / "Fragments/ShortcutProperties.wxs"
