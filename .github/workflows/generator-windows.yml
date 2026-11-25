@@ -491,20 +491,21 @@ jobs:
           targets: ${{ matrix.job.target }}
           components: "rustfmt"
 
-      - name: Restore vcpkg installed cache
-        uses: actions/cache@v6
-        with:
-          path: C:\vcpkg\installed
-          key: vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.vcpkg-triplet }}
-          restore-keys: |
-            vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-
-
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: C:\vcpkg
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: true
+
+      - name: Restore vcpkg installed cache
+        id: vcpkg-installed-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-windows-${{ matrix.job.os }}-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.vcpkg-triplet }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'res/vcpkg/**') }}
+          restore-keys: |
+            vcpkg-windows-${{ matrix.job.os }}-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.vcpkg-triplet }}-
 
       - name: Install vcpkg dependencies
         env:
@@ -530,11 +531,12 @@ jobs:
         shell: bash
 
       - name: Save vcpkg installed cache
+        if: steps.vcpkg-installed-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         continue-on-error: true
         with:
           path: C:\vcpkg\installed
-          key: vcpkg-windows-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.vcpkg-triplet }}
+          key: ${{ steps.vcpkg-installed-cache.outputs.cache-primary-key }}
 
       - name: magick stuff
         if: ${{ env.iconlink_url != 'false' }}
