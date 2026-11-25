@@ -927,13 +927,13 @@ jobs:
         if: env.rdgen == 'true' && !inputs.artifact_only
         uses: nick-fields/retry@v4
         with:
-          timeout_minutes: 8
-          max_attempts: 2
+          timeout_minutes: 22
+          max_attempts: 3
           retry_wait_seconds: 15
           shell: bash
           command: |
             upload() {
-              curl --fail-with-body --connect-timeout 30 --max-time 210 \
+              curl --fail-with-body --connect-timeout 30 --max-time 600 \
                 -H "Expect:" -H "Authorization: Bearer $token" -F "file=@$1" -F "uuid=$uuid" \
                 "${{ secrets.GENURL }}/save_custom_client"
             }
